@@ -90,14 +90,21 @@ Every message that arrives is also shown to you in the transcript, as `Crosstalk
 `/crosstalk open` opens a new terminal tab in your VS Code window, and the model can do the same: "Open a GLM session and ask it to review this file." This needs a small helper extension, because nothing outside VS Code can open a terminal inside it. Install it once:
 
 ```bash
-code --install-extension <the plugin's folder>/vscode/crosstalk-terminal-0.2.0.vsix
+code --install-extension <the plugin's folder>/vscode/crosstalk-terminal-0.3.0.vsix
 ```
 
 Or build it from `vscode/` with `npx @vscode/vsce package`. The helper only runs commands that start Claude Code, so a link from anywhere else can't run anything else through it. Without the helper, or outside VS Code, `open` starts a new Windows Terminal window. Other systems are not supported yet.
 
 If you start a profile some other way than `claude-<profile>`, tell Crosstalk once: `/crosstalk launch zai claude zai`.
 
-The new tab opens next to your terminal tabs in the editor area, like their `+` button, if you keep terminals there. Otherwise it opens in the bottom panel. To choose, set `crosstalkTerminal.location` in VS Code's settings: `auto`, `editor`, `split` (beside the active terminal) or `panel`.
+By default the new session opens as a tab to the right of your terminal tabs at the top, and takes focus. Two VS Code settings change that. You don't need to reload after changing them:
+
+| Setting | Choices | Default |
+|---|---|---|
+| `crosstalkTerminal.location` | `right`: a new tab to the right. `beside`: a new column beside this one. `split`: split with the active terminal. `bottom`: the bottom terminal panel | `right` |
+| `crosstalkTerminal.focus` | `true`: jump to the new tab. `false`: stay where you are | `true` |
+
+After installing or updating the helper, reload the VS Code window (**Developer: Reload Window**) so the new version loads. Restarting only the extension host doesn't load it.
 
 **Addresses** look like `profile/folder-xxxx`, such as `work/my-app-1a2b`. The profile name alone works when that profile has one session running.
 

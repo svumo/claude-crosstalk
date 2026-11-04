@@ -3,7 +3,7 @@
   "displayName": "Crosstalk terminal",
   "description": "Lets Crosstalk open a Claude Code session in a new terminal inside this VS Code window.",
   "publisher": "svumo",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "license": "MIT",
   "repository": "https://github.com/svumo/claude-crosstalk",
   "engines": {
@@ -19,15 +19,20 @@
       "properties": {
         "crosstalkTerminal.location": {
           "type": "string",
-          "enum": ["auto", "editor", "split", "panel"],
+          "enum": ["right", "beside", "split", "bottom"],
           "enumDescriptions": [
-            "Beside your terminal tabs in the editor area if you keep terminals there, else the bottom panel",
-            "A new tab in the editor area, in the group with your terminals or the active one",
+            "A new tab to the right, in the editor group with your terminal tabs",
+            "A new editor column beside the current one",
             "Split beside the active terminal",
             "The bottom terminal panel"
           ],
-          "default": "auto",
+          "default": "right",
           "description": "Where /crosstalk open starts a new session."
+        },
+        "crosstalkTerminal.focus": {
+          "type": "boolean",
+          "default": true,
+          "description": "Whether the new session's tab takes focus. Off keeps you in the tab you're in."
         }
       }
     }

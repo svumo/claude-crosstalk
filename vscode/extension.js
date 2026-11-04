@@ -4,8 +4,12 @@
 // JSON holding { name, cwd, cmd }. Only a command that starts Claude Code is run: `claude`, maybe
 // followed by plain words, so a link from anywhere else can't run anything else through it.
 //
-// Where it opens is the setting crosstalkTerminal.location. `auto`: beside your terminal tabs in
-// the editor area, as their + button does, when you keep terminals there; else the bottom panel.
+// Where it lands is the setting crosstalkTerminal.location, read on every open:
+//   right   a new tab to the right, in the editor group with your terminal tabs (the default)
+//   beside  a new editor column beside the current one
+//   split   split beside the active terminal
+//   bottom  the bottom terminal panel
+// crosstalkTerminal.focus says whether the new tab takes focus.
 
 const vscode = require("vscode");
 
@@ -19,27 +23,27 @@ function decode(query) {
 
 const isTerminalTab = (tab) => tab.input instanceof vscode.TabInputTerminal;
 
-// The editor group holding terminal tabs: the active one if it has any, else the first that does.
+// The editor group to add to: the active one if it holds a terminal tab, else the first that
+// does, else the active one.
 function terminalGroup() {
   const groups = vscode.window.tabGroups;
   if (groups.activeTabGroup.tabs.some(isTerminalTab)) {
     return groups.activeTabGroup;
   }
-  return groups.all.find((g) => g.tabs.some(isTerminalTab));
+  return groups.all.find((g) => g.tabs.some(isTerminalTab)) ?? groups.activeTabGroup;
 }
 
-function locationFor(setting) {
-  if (setting === "panel") {
+function locationFor(where, preserveFocus) {
+  if (where === "bottom") {
     return vscode.TerminalLocation.Panel;
   }
-  if (setting === "split" && vscode.window.activeTerminal) {
+  if (where === "split" && vscode.window.activeTerminal) {
     return { parentTerminal: vscode.window.activeTerminal };
   }
-  const group = terminalGroup();
-  if (setting === "editor" || group) {
-    return { viewColumn: group ? group.viewColumn : vscode.ViewColumn.Active, preserveFocus: false };
+  if (where === "beside") {
+    return { viewColumn: vscode.ViewColumn.Beside, preserveFocus };
   }
-  return vscode.TerminalLocation.Panel;
+  return { viewColumn: terminalGroup().viewColumn, preserveFocus };
 }
 
 function activate(context) {
@@ -60,13 +64,15 @@ function activate(context) {
         vscode.window.showWarningMessage(`Crosstalk only starts Claude Code, so it didn't run: ${cmd.slice(0, 80)}`);
         return;
       }
-      const setting = vscode.workspace.getConfiguration("crosstalkTerminal").get("location", "auto");
+      const settings = vscode.workspace.getConfiguration("crosstalkTerminal");
+      const where = settings.get("location", "right");
+      const preserveFocus = !settings.get("focus", true);
       const terminal = vscode.window.createTerminal({
         name: String(ask.name ?? "claude").slice(0, 40),
         cwd: ask.cwd ? String(ask.cwd) : undefined,
-        location: locationFor(setting),
+        location: locationFor(where, preserveFocus),
       });
-      terminal.show();
+      terminal.show(preserveFocus);
       terminal.sendText(cmd);
     },
   }));
