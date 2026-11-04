@@ -79,6 +79,23 @@ Just ask, in plain words:
 | `/crosstalk setup` | Shows your profiles and what setup would do. Changes nothing |
 | `/crosstalk setup yes` | Does it |
 | `/crosstalk add <name>` | Makes a new profile, ready to log in to |
+| `/crosstalk open <profile> [message]` | Starts a session on that profile in a new terminal, in this folder, and sends it your message once it's up |
+| `/crosstalk open-in auto\|vscode\|window` | Where `open` starts it. `auto` is a VS Code terminal when you're in VS Code, else a new window |
+| `/crosstalk launch <profile> <command>` | The command that starts a profile, such as `claude zai`. Default: `claude-<profile>` |
+
+Every message that arrives is also shown to you in the transcript, as `Crosstalk ← sender`, so you don't have to ask whether anyone replied.
+
+### Opening a session in VS Code
+
+`/crosstalk open` opens a new terminal tab in your VS Code window, and the model can do the same: "Open a GLM session and ask it to review this file." This needs a small helper extension, because nothing outside VS Code can open a terminal inside it. Install it once:
+
+```bash
+code --install-extension <the plugin's folder>/vscode/crosstalk-terminal-0.1.0.vsix
+```
+
+Or build it from `vscode/` with `npx @vscode/vsce package`. The helper only runs commands that start Claude Code, so a link from anywhere else can't run anything else through it. Without the helper, or outside VS Code, `open` starts a new Windows Terminal window. Other systems are not supported yet.
+
+If you start a profile some other way than `claude-<profile>`, tell Crosstalk once: `/crosstalk launch zai claude zai`.
 
 **Addresses** look like `profile/folder-xxxx`, such as `work/my-app-1a2b`. The profile name alone works when that profile has one session running.
 
@@ -204,6 +221,9 @@ Each session records that it's running and checks its own inbox. When a message 
 | Two profiles show the same name | Change one with `/crosstalk setup name`. |
 | A message didn't wake a session | Run `/crosstalk` there. It may be off, or at its wake-up limit, which clears when you type. |
 | A provider can't send messages | Its model may not support tool calls. |
+| `open` makes a window, not a VS Code tab | The helper isn't installed (see Opening a session in VS Code), or `open-in` is set to `window`. |
+| `open` says no session showed up | Look in the new terminal. The launch command may be wrong: check it with `/crosstalk launch <profile>`. |
+| With several VS Code windows, the tab opened in another one | The link goes to the window you used last. Click into the one you want, then try again. |
 
 ## Settings
 
@@ -214,6 +234,9 @@ Optional environment variables, set before you start a session:
 | `CLAUDE_CROSSTALK_NAME` | This session's profile name, over any other | From the folder |
 | `CLAUDE_CROSSTALK_DIR` | The shared folder. Set the same on every profile | `~/.claude-crosstalk` |
 | `CLAUDE_CROSSTALK_WAKE_LIMIT` | Wake-ups in a row before messages wait for you | 25 |
+| `CLAUDE_CROSSTALK_OPEN_IN` | Where `/crosstalk open` starts a session (`auto`, `vscode`, `window`), over the saved setting | `auto` |
+
+`/crosstalk open-in` and `/crosstalk launch` save their settings in `setup.json` in the shared folder, so every profile uses them.
 
 ## Tested on
 

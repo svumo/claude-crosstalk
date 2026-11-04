@@ -15,7 +15,8 @@
 
 import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
-  pendingNames, profileName, resolveTarget, toolResultCount, toolUseCount,
+  pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
+  chooseOpenIn, findOpened, HELPER_ID, isSafeLaunch, launchFor, OPEN_IN, vscodeLink, windowArgv,
 } from "./core.mjs";
 import {
   configDirsInShell, homeCandidates, isInstalled, isSafeFolder, isSafeName, isUnreadable, looksLikeProfile,
@@ -29,6 +30,10 @@ const BAD_TRIES = 20;
 const PRUNE_DAYS = 7;
 const SEND = "mcp__crosstalk__send";
 const LIST = "mcp__crosstalk__list";
+const OPEN = "mcp__crosstalk__open";
+// How long a session being opened has to show up, looked for once a second.
+const OPEN_WAIT_S = 90;
+const PROFILE_WORD = /^[a-z0-9][a-z0-9_-]{0,30}$/;
 const MARKETPLACE = "svumo/claude-crosstalk";
 
 let limit = 25;
@@ -146,9 +151,16 @@ export function register(on) {
     if (found.error) {
       return failed(found.error);
     }
-    const name = messageFileName(now, Math.random().toString(36).slice(2, 10));
-    await $.fs.write(`${root}/inbox/${found.record.id}/${name}`, JSON.stringify({ from: me.address, fromId: me.id, to: found.record.address, sentAt: now, text }));
+    await writeMessage($, found.record, text, now);
     return { result: `Sent to ${found.record.address}. It arrives within a few seconds, or after the step that session is on.` };
+  });
+
+  on("tool.call", { tool: OPEN }, async ($, e) => {
+    if (!me) {
+      return notReady();
+    }
+    const opened = await openSession($, String(e.profile ?? "").trim().toLowerCase(), String(e.message ?? ""));
+    return opened.error ? failed(opened.error) : { result: opened.text };
   });
 
   on("command.run", { command: "crosstalk" }, async ($, e) => {
@@ -166,6 +178,16 @@ export function register(on) {
     }
     if (word === "add") {
       return { text: await addProfile($, String(words[1] ?? "").toLowerCase()) };
+    }
+    if (word === "open") {
+      const opened = await openSession($, String(words[1] ?? "").toLowerCase(), words.slice(2).join(" "));
+      return { text: opened.error ?? opened.text };
+    }
+    if (word === "open-in") {
+      return { text: await openInCommand($, String(words[1] ?? "").toLowerCase()) };
+    }
+    if (word === "launch") {
+      return { text: await launchCommand($, String(words[1] ?? "").toLowerCase(), words.slice(2).join(" ")) };
     }
     const now = await $.clock.now();
     const others = (await readSessions($)).filter((r) => r.id !== me.id && isLive(r, now)).map((r) => r.address);
@@ -479,6 +501,106 @@ async function addProfile($, name) {
   return lines.join("\n");
 }
 
+async function writeMessage($, record, text, now) {
+  const name = messageFileName(now, Math.random().toString(36).slice(2, 10));
+  await $.fs.write(`${root}/inbox/${record.id}/${name}`, JSON.stringify({ from: me.address, fromId: me.id, to: record.address, sentAt: now, text }));
+}
+
+// The VS Code command line. On Windows `code` is a .cmd that only cmd.exe starts.
+async function runCode($, pc, args) {
+  try {
+    return await $.process.run(["code", ...args], { timeoutMs: 30_000 });
+  } catch {
+    return pc.isWindows ? $.process.run(["cmd.exe", "/d", "/c", "code", ...args], { timeoutMs: 30_000 }).catch(() => null) : null;
+  }
+}
+
+async function hasHelper($, pc) {
+  const listed = await runCode($, pc, ["--list-extensions"]);
+  return Boolean(listed && listed.exitCode === 0 && listed.stdout.toLowerCase().split(/\r?\n/).map((l) => l.trim()).includes(HELPER_ID));
+}
+
+async function openInCommand($, value) {
+  const setup = await readJson($, `${root}/setup.json`, {});
+  if (value === "") {
+    const fromEnv = await $.env.get("CLAUDE_CROSSTALK_OPEN_IN");
+    return `New sessions open in: ${setup.openIn ?? "auto"}${fromEnv ? ` (CLAUDE_CROSSTALK_OPEN_IN=${fromEnv} wins)` : ""}. Choices: ${OPEN_IN.join(", ")}.`;
+  }
+  if (!OPEN_IN.includes(value)) {
+    return `Usage: /crosstalk open-in ${OPEN_IN.join("|")}. auto is VS Code when this session runs there, else a new terminal window.`;
+  }
+  setup.openIn = value;
+  await saveSetup($, setup);
+  return `New sessions open in: ${value}.`;
+}
+
+async function launchCommand($, profile, command) {
+  const setup = await readJson($, `${root}/setup.json`, {});
+  if (!PROFILE_WORD.test(profile)) {
+    const saved = Object.entries(setup.launch ?? {}).map(([p, c]) => `${p}: ${c}`).join(", ");
+    return `Usage: /crosstalk launch <profile> <command>, such as /crosstalk launch zai claude zai.${saved ? ` Saved: ${saved}.` : ""}`;
+  }
+  if (command.trim() === "") {
+    return `${profile} starts with: ${launchFor(profile, setup)}`;
+  }
+  if (!isSafeLaunch(command.trim())) {
+    return `Crosstalk only starts Claude Code: a command that is claude or claude-<name>, then plain words, such as "claude zai".`;
+  }
+  setup.launch = { ...setup.launch, [profile]: command.trim() };
+  await saveSetup($, setup);
+  return `${profile} starts with: ${command.trim()}`;
+}
+
+// Start a session on `profile` in a new terminal, here in this folder, then say so when it is up
+// and hand it `message`. Returns { text } at once, or { error }.
+async function openSession($, profile, message) {
+  if (!PROFILE_WORD.test(profile)) {
+    return { error: "Usage: /crosstalk open <profile> [first message], such as /crosstalk open zai say hello." };
+  }
+  const setup = await readJson($, `${root}/setup.json`, {});
+  const command = launchFor(profile, setup);
+  if (!isSafeLaunch(command)) {
+    return { error: `${profile} would start with "${command}", and Crosstalk only starts Claude Code. Set it with /crosstalk launch ${profile} <command>.` };
+  }
+  const pc = await computer($);
+  const fromEnv = await $.env.get("CLAUDE_CROSSTALK_OPEN_IN");
+  const termProgram = await $.env.get("TERM_PROGRAM");
+  const wanted = String(fromEnv || setup.openIn || "auto").toLowerCase();
+  const helper = wanted === "window" ? false : await hasHelper($, pc);
+  const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper);
+  const since = await $.clock.now();
+  let ran = null;
+  if (choice.where === "vscode") {
+    ran = await runCode($, pc, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: me.cwd, cmd: command })]);
+  } else if (pc.isWindows) {
+    ran = await $.process.run(windowArgv(me.cwd, command), { timeoutMs: 30_000 }).catch(() => null);
+  } else {
+    return { error: "A new terminal window is only opened on Windows so far. In VS Code, install the Crosstalk terminal helper and use /crosstalk open-in vscode." };
+  }
+  if (!ran || ran.exitCode !== 0) {
+    return { error: `Couldn't open a ${choice.where === "vscode" ? "VS Code terminal" : "terminal window"}${ran?.stderr ? `: ${ran.stderr.trim().slice(0, 200)}` : "."}` };
+  }
+  void watchOpened($, profile, since - 2_000, message);
+  const place = choice.where === "vscode" ? "a new VS Code terminal" : "a new terminal window";
+  return { text: `Opening ${profile} (${command}) in ${place}${choice.why ? `, as ${choice.why}` : ""}. Crosstalk says here when it is up${message.trim() ? ", then sends it your message" : ""}.` };
+}
+
+async function watchOpened($, profile, since, message) {
+  for (let i = 0; i < OPEN_WAIT_S; i += 1) {
+    await $.clock.sleep(1_000);
+    const now = await $.clock.now();
+    const found = findOpened(await readSessions($), profile, me.cwd, since, now);
+    if (found) {
+      if (message.trim()) {
+        await writeMessage($, found, message.trim(), now);
+      }
+      $.ui.log(`Crosstalk: ${found.address} is up${message.trim() ? " and has your message" : ""}.`);
+      return;
+    }
+  }
+  $.ui.log(`Crosstalk: no ${profile} session showed up within ${OPEN_WAIT_S} seconds. Check the new terminal, and /crosstalk launch ${profile} for the command it ran.`);
+}
+
 function failed(text) {
   return { deny: text }; // the model reads it as the tool's error
 }
@@ -516,7 +638,13 @@ async function startUp($) {
     inputSchema: { type: "object", properties: {} },
     isDeferred: false,
   });
-  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. /crosstalk setup connects your other profiles; /crosstalk add <name> makes a new one; off and on pause it." });
+  await $.tool.register({
+    name: "open",
+    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in VS Code when this session runs there, else in a new terminal window.",
+    inputSchema: { type: "object", properties: { profile: { type: "string", description: "The profile to start, as /crosstalk names them" }, message: { type: "string", description: "A first message to send it once it is running" } }, required: ["profile"] },
+    isDeferred: false,
+  });
+  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. open <profile> [message] starts one; open-in and launch set how; setup connects profiles; add <name> makes one; off and on pause it." });
   $.clock.every(BEAT_MS, () => beat($).catch(() => {}));
   $.clock.every(POLL_MS, () => poll($).catch(() => {}));
   void prune($);
@@ -579,9 +707,12 @@ async function unmark($, batch) {
   await saveDelivered($);
 }
 
+// Called only once a batch is on its way to the model: the person sees the toast and, in the
+// transcript, the messages themselves, so nothing depends on the model passing them on.
 function noteArrival($, batch) {
   const from = [...new Set(batch.map((m) => m.from))].join(", ");
   $.ui.toast(`Crosstalk: ${batch.length === 1 ? "a message" : `${batch.length} messages`} from ${from}`);
+  $.ui.log(showMessages(batch, `${root}/inbox/${me.id}`));
 }
 
 // Between turns: a message starts a turn, up to the limit.

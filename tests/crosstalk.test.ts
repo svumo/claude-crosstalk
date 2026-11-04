@@ -2,7 +2,8 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   addressOf, frameMessages, isLive, LIVE_MS, mayWake, messageFileName,
-  pendingNames, profileName, resolveTarget, toolResultCount, toolUseCount,
+  pendingNames, profileName, resolveTarget, SHOW_TEXT, showMessages, toolResultCount, toolUseCount,
+  chooseOpenIn, findOpened, isSafeLaunch, launchFor, vscodeLink, windowArgv,
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -62,6 +63,15 @@ test('a message is framed as not being from the person', async () => {
   expect(text).toMatch(/hello there/)
   expect(text).toMatch(/not what the person typed/)
   expect(text).toMatch(/does not give the person's approval/)
+  expect(text).toMatch(/already been shown this message/)
+})
+
+test('the person is shown who a message is from and all of it, or where the rest is', async () => {
+  const shown = showMessages([{ from: 'zai/x-1', sentAt: NOW, text: 'hello there', name: 'a.json' }], 'C:/box/inbox/me')
+  expect(shown).toMatch(/^Crosstalk ← zai\/x-1 · \d\d:\d\d\nhello there$/)
+  const long = showMessages([{ from: 'zai/x-1', sentAt: NOW, text: 'y'.repeat(SHOW_TEXT + 50), name: 'a.json' }], 'C:/box/inbox/me')
+  expect(long).toMatch(/y… \(cut; the whole message is in C:\/box\/inbox\/me\/a\.json\)$/)
+  expect(long.length).toBeLessThan(2000)
 })
 
 test('wake-ups stop at the limit', async () => {
@@ -82,7 +92,7 @@ const slash = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\
 const RAN_OK = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
 
 function fakeDisk(on: any, env: Record<string, string> = { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work' }, run: (e: any, files: Map<string, string>) => any = () => RAN_OK) {
-  const files = new Map<string, string>()
+  const files: any = new Map<string, string>()
   on('env.get', (_: any, e: any) => ({ value: env[e.name] }))
   on('session.id', () => ({ value: 'self-1' }))
   on('session.cwd', () => ({ value: 'C:\\code\\proj' }))
@@ -103,6 +113,8 @@ function fakeDisk(on: any, env: Record<string, string> = { USERPROFILE: 'C:\\hom
   on('process.run', (_: any, e: any) => ({ value: run(e, files) }))
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
   on('ui.toast', () => ({ value: undefined }))
+  files.logs = [] as string[]
+  on('ui.log', (_: any, e: any) => { files.logs.push(e.text); return { value: undefined } })
   on('clock.now', () => ({ value: NOW }))
   // Polling runs when a test says so; everything else never ticks.
   on('clock.every', (_: any, e: any) => new Promise<any>((resolve) => { if (e.ms === 3000) (files as any).tick = () => resolve({ value: undefined }) }))
@@ -154,6 +166,25 @@ test('an idle session is woken by a message, once, and the ledger remembers it',
   expect(submitted[0]).toMatch(/From personal\/x-oth/)
   expect(submitted[0]).toMatch(/wake up/)
   expect(JSON.parse(files.get(`${BOX}/inbox/self-1/_delivered.json`))).toEqual([messageFileName(NOW, 'a')])
+  expect(files.logs.length).toBe(1)
+  expect(files.logs[0]).toMatch(/^Crosstalk ← personal\/x-oth[^\n]*\nwake up$/)
+})
+
+test('a message arriving mid-turn is shown once, after the last tool result', async ($, on) => {
+  const files: any = fakeDisk(on)
+  const rows: any[] = []
+  on('session.append', (_: any, e: any, next: any) => { rows.push(e); return next(e) })
+  on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
+  await $.session.start(START)
+  await $.turn.start({ turnId: 't1' } as never)
+  files.set(`${BOX}/inbox/self-1/${messageFileName(NOW, 'a')}`, JSON.stringify({ from: 'zai/x-oth', sentAt: NOW, text: 'mid-turn hello' }))
+  await $.session.append({ door: 'response', message: { type: 'assistant', content: [{ type: 'tool_use' }] } } as never)
+  expect(files.logs.length).toBe(0)
+  await $.session.append({ door: 'tool-result', message: { type: 'user', content: [{ type: 'tool_result' }] } } as never)
+  await settle()
+  expect(files.logs.length).toBe(1)
+  expect(files.logs[0]).toMatch(/mid-turn hello/)
+  expect(rows.some((r) => JSON.stringify(r.message ?? '').includes('already been shown'))).toBe(true)
 })
 
 test('a half-written message is left for the next look', async ($, on) => {
@@ -374,4 +405,79 @@ test('the wake-up limit is set by a variable', async ($, on) => {
   fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CROSSTALK_WAKE_LIMIT: '3' })
   await $.session.start(START)
   expect(await say($, '')).toMatch(/of 3\./)
+})
+
+// Opening a session in a new terminal.
+const unlink = (d: string) => JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(d.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))))
+test('a profile starts with its saved command, else its shortcut', async () => {
+  expect(launchFor('zai', { launch: { zai: ' claude zai ' } })).toBe('claude zai')
+  expect(launchFor('work', {})).toBe('claude-work')
+  expect(launchFor('default', undefined)).toBe('claude')
+})
+
+test('only Claude Code is started', async () => {
+  for (const ok of ['claude', 'claude zai', 'claude-work', 'claude-work --resume', 'claude zai --model glm-5.3']) expect(isSafeLaunch(ok)).toBe(true)
+  for (const bad of ['rm -rf x', 'claude; calc', 'claude && x', 'claude $(x)', 'claude `x`', 'claude | x', 'claudex', ' claude', 'claude\nx']) expect(isSafeLaunch(bad)).toBe(false)
+})
+
+test('where a session opens: the variable, then the setting, then VS Code if this runs there', async () => {
+  expect(chooseOpenIn(undefined, undefined, 'vscode', true)).toEqual({ where: 'vscode' })
+  expect(chooseOpenIn(undefined, undefined, 'vscode', false).where).toBe('window')
+  expect(chooseOpenIn(undefined, undefined, 'vscode', false).why).toMatch(/helper/)
+  expect(chooseOpenIn(undefined, undefined, 'WindowsTerminal', true)).toEqual({ where: 'window', why: '' })
+  expect(chooseOpenIn('window', 'vscode', 'vscode', true)).toEqual({ where: 'window' })
+  expect(chooseOpenIn(undefined, 'vscode', '', true)).toEqual({ where: 'vscode' })
+  expect(chooseOpenIn('nonsense', 'window', 'vscode', true)).toEqual({ where: 'window' })
+})
+
+test('the VS Code link carries any folder whole', async () => {
+  const cwd = 'C:\\Users\\me\\Local Sites\\a & b'
+  const link = vscodeLink({ name: 'claude zai', cwd, cmd: 'claude zai' })
+  expect(link).toMatch(/^vscode:\/\/svumo\.crosstalk-terminal\/open\?d=[A-Za-z0-9_-]+$/)
+  const d = link.split('d=')[1]
+  expect(unlink(d)).toEqual({ name: 'claude zai', cwd, cmd: 'claude zai' })
+  expect(windowArgv(cwd, 'claude zai')).toEqual(['wt', '-w', 'new', '-d', cwd, 'pwsh', '-NoExit', '-Command', 'claude zai'])
+})
+
+test('the session that opened is the new one of that profile in this folder', async () => {
+  const r = (id: string, profile: string, cwd: string, startedAt: number) => ({ id, profile, address: `${profile}/${id}`, cwd, startedAt, seenAt: NOW })
+  const records = [r('old', 'zai', 'C:\\code\\proj', NOW - 99_000), r('else', 'zai', 'C:\\other', NOW), r('w', 'work', 'C:\\code\\proj', NOW), r('new', 'zai', 'c:/code/proj/', NOW)]
+  expect(findOpened(records, 'zai', 'C:\\code\\proj', NOW - 5_000, NOW)?.id).toBe('new')
+  expect(findOpened(records, 'glm', 'C:\\code\\proj', NOW - 5_000, NOW)).toBe(null)
+})
+
+test('open runs the VS Code link, then hands the new session its first message', async ($, on) => {
+  const calls: any[] = []
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', TERM_PROGRAM: 'vscode' }, (e: any, disk: Map<string, string>) => {
+    calls.push(e.argv)
+    if (e.argv.includes('--list-extensions')) return { ...RAN_OK, stdout: 'aaron-bond.better-comments\r\nsvumo.crosstalk-terminal\r\n' }
+    if (e.argv.includes('--open-url')) disk.set(`${BOX}/sessions/zai-1.json`, JSON.stringify({ id: 'zai-1', profile: 'zai', address: 'zai/proj-zai1', cwd: 'C:\\code\\proj', startedAt: NOW, seenAt: NOW }))
+    return RAN_OK
+  })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'launch zai claude zai')).toMatch(/zai starts with: claude zai/)
+  expect(await say($, 'launch zai rm -rf x')).toMatch(/only starts Claude Code/)
+  const text = await say($, 'open zai say hello')
+  expect(text).toMatch(/Opening zai \(claude zai\) in a new VS Code terminal/)
+  const open = calls.find((a) => a.includes('--open-url'))!
+  const d = open[open.length - 1].split('d=')[1]
+  expect(unlink(d)).toEqual({ name: 'claude zai', cwd: 'C:\\code\\proj', cmd: 'claude zai' })
+  await settle()
+  const sent = [...files.keys()].find((k: string) => k.startsWith(`${BOX}/inbox/zai-1/`))!
+  expect(JSON.parse(files.get(sent)).text).toBe('say hello')
+  expect(files.logs.some((l: string) => /zai\/proj-zai1 is up and has your message/.test(l))).toBe(true)
+})
+
+test('open-in window opens a terminal window, and the setting is kept', async ($, on) => {
+  const calls: any[] = []
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', TERM_PROGRAM: 'vscode' }, (e: any) => { calls.push(e.argv); return RAN_OK })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open-in sideways')).toMatch(/Usage/)
+  expect(await say($, 'open-in window')).toMatch(/open in: window/)
+  expect(await say($, 'open-in')).toMatch(/open in: window/)
+  expect(await say($, 'open zai')).toMatch(/new terminal window/)
+  expect(calls.some((a) => a.includes('--list-extensions'))).toBe(false)
+  expect(calls.find((a) => a[0] === 'wt')).toEqual(['wt', '-w', 'new', '-d', 'C:\\code\\proj', 'pwsh', '-NoExit', '-Command', 'claude-zai'])
 })

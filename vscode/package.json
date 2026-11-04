@@ -1,0 +1,16 @@
+{
+  "name": "crosstalk-terminal",
+  "displayName": "Crosstalk terminal",
+  "description": "Lets Crosstalk open a Claude Code session in a new terminal inside this VS Code window.",
+  "publisher": "svumo",
+  "version": "0.1.0",
+  "license": "MIT",
+  "repository": "https://github.com/svumo/claude-crosstalk",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "main": "./extension.js",
+  "activationEvents": [
+    "onUri"
+  ]
+}
