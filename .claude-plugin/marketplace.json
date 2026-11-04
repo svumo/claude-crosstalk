@@ -1,0 +1,13 @@
+{
+  "name": "claude-crosstalk",
+  "owner": {
+    "name": "svumo"
+  },
+  "plugins": [
+    {
+      "name": "crosstalk",
+      "source": "./",
+      "description": "Lets Claude Code sessions message each other, across profiles, accounts and AI providers on one computer."
+    }
+  ]
+}
