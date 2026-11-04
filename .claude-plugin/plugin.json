@@ -1,6 +1,6 @@
 {
   "name": "crosstalk",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Lets Claude Code sessions message each other, across profiles, accounts and AI providers on one computer.",
   "author": {
     "name": "svumo"

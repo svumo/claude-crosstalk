@@ -1,33 +1,30 @@
-# Crosstalk
+<p align="center">
+  <img src="assets/banner.svg" alt="Crosstalk: let your Claude Code sessions talk to each other, across multiple Claude accounts and other AI providers." width="100%">
+</p>
 
-**Let your Claude Code sessions talk to each other, even when they're on different accounts or AI providers.**
+<p align="center">
+  <a href="#install"><img src="https://img.shields.io/badge/install-one_line-8b5cf6?style=for-the-badge&labelColor=1b1b3a" alt="Install in one line"></a>
+  <a href="#what-it-works-with"><img src="https://img.shields.io/badge/works_with-any_provider-2dd4bf?style=for-the-badge&labelColor=1b1b3a" alt="Works with any provider Claude Code can use"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-7dd3fc?style=for-the-badge&labelColor=1b1b3a" alt="MIT licence"></a>
+</p>
 
-Open a few sessions, tell one what you want in plain words, and it messages the others. An idle session wakes up by itself and replies.
+<p align="center">
+  <b>Tell one session what you want. It hands the work to your other sessions, and they reply when they're done.</b><br>
+  Idle sessions wake up by themselves, on any account and any provider.
+</p>
 
-```text
-You, in your work session:   ask the glm session to review my changes
+<p align="center">
+  <img src="assets/example.svg" alt="You ask Claude Code, acting as orchestrator, to review, test and document your work. It sends jobs through Crosstalk to sessions on three Claude accounts and on other AI providers: GPT and Gemini through a gateway, GLM, DeepSeek and more. Each wakes up by itself and replies through Crosstalk, and the orchestrator reports back to you." width="100%">
+</p>
 
-work/my-app-1a2b   → glm/my-app-9f3c        Please review the changes on this branch.
-glm/my-app-9f3c    → work/my-app-1a2b       Reviewed. One bug in the retry logic: line 42.
-```
-
-## What it works with
-
-**Any AI provider you've set up to run through Claude Code.** Claude subscriptions, GLM, DeepSeek or anything else, all in the same conversation.
-
-| Provider | Status |
-|---|---|
-| Claude | Tested |
-| GLM, through Z.ai's Anthropic-compatible endpoint | Tested |
-| Anything else that runs in Claude Code | Should work, not tested |
-
-Crosstalk runs on your computer, not in the model, so it doesn't care which model is on the other end. The one requirement is that the model supports tool calls, because that's how a session sends a message.
-
-## Why you might want it
-
-Claude Code's built-in messaging only reaches sessions on the same profile, because each profile keeps its own list of sessions. Run one session on your work account and another on your personal account or a different provider, and they can't see each other. Crosstalk connects them through a folder they can all read.
-
-A *profile* is a separate Claude Code config folder, chosen with `CLAUDE_CONFIG_DIR`. If you only use one, Crosstalk works there too.
+<p align="center">
+  <a href="#install">Install</a> ·
+  <a href="#use-it">Use it</a> ·
+  <a href="#multiple-claude-accounts">Multiple accounts</a> ·
+  <a href="#what-it-works-with">Providers</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#costs-and-safety">Costs and safety</a>
+</p>
 
 ## Install
 
@@ -37,6 +34,11 @@ At the prompt of a terminal session:
 /plugin install crosstalk --marketplace svumo/claude-crosstalk
 ```
 
+Then restart any session that was already open. That's it for a single profile.
+
+<details>
+<summary><b>From a shell, or the desktop app</b></summary>
+
 From a shell:
 
 ```bash
@@ -45,26 +47,14 @@ claude plugin install crosstalk --marketplace svumo/claude-crosstalk
 
 In the desktop app, where `/plugin` does not run: click **+** next to the prompt box, then **Plugins**, **Add marketplace** with `svumo/claude-crosstalk`, then **Add plugin**.
 
-**Install it once per profile**, pointing at each one's config folder:
-
-```bash
-# macOS or Linux
-CLAUDE_CONFIG_DIR=~/.claude-work claude plugin install crosstalk --marketplace svumo/claude-crosstalk
-```
-
-```powershell
-# Windows PowerShell
-$env:CLAUDE_CONFIG_DIR = "$HOME\.claude-work"; claude plugin install crosstalk --marketplace svumo/claude-crosstalk
-```
-
-Then restart any session that was already open.
+</details>
 
 ## Use it
 
 Just ask, in plain words:
 
 - "List the other sessions."
-- "Ask the glm session to review my changes."
+- "Ask the session on my second account to review my changes."
 - "Send work a message saying the build is fixed."
 
 | Command | What it does |
@@ -75,17 +65,50 @@ Just ask, in plain words:
 
 **Addresses** look like `profile/folder-xxxx`, such as `work/my-app-1a2b`. The profile name alone works when that profile has one session running.
 
-**Profile names** come from the config folder: `~/.claude` is `default`, `~/.claude-work` is `work`, and any other folder goes by its own name. To choose a name, set `CLAUDE_CROSSTALK_NAME`.
+Crosstalk carries the messages; it doesn't plan the work. Whichever session you ask does the orchestrating, so you can make any session the lead.
+
+## Multiple Claude accounts
+
+Claude Code's built-in messaging only reaches sessions on the same profile, because each profile keeps its own list of sessions. A session on one account can't see a session on another. Crosstalk connects them through a folder they can all read.
+
+A *profile* is a separate Claude Code config folder, chosen with `CLAUDE_CONFIG_DIR`. Each one keeps its own login, so give each account its own:
+
+```bash
+# macOS or Linux
+export CLAUDE_CONFIG_DIR=~/.claude-work
+claude plugin install crosstalk --marketplace svumo/claude-crosstalk
+claude
+```
+
+```powershell
+# Windows PowerShell
+$env:CLAUDE_CONFIG_DIR = "$HOME\.claude-work"
+claude plugin install crosstalk --marketplace svumo/claude-crosstalk
+claude
+```
+
+Repeat for each profile, then open a session on each. Run `/crosstalk` and they'll list each other.
+
+**Names** come from the folder: `~/.claude` is `default`, `~/.claude-work` is `work`, and any other folder goes by its own name. To choose a name, set `CLAUDE_CROSSTALK_NAME`.
+
+## What it works with
+
+**Any AI provider you can point Claude Code at.** Claude Code speaks Anthropic's API format, so that means anything with an Anthropic-compatible endpoint, or any other model through a translating gateway such as LiteLLM. The model has to support tool calls, because that's how a session sends a message.
+
+| Provider | How it connects | Status |
+|---|---|---|
+| Claude, on one or many accounts | Directly | Tested |
+| GLM | Z.ai's Anthropic-compatible endpoint | Tested |
+| DeepSeek and others with an Anthropic-compatible endpoint | Directly, using `ANTHROPIC_BASE_URL` | Should work, not tested |
+| GPT, Gemini and others | Through a gateway such as LiteLLM | Should work, not tested |
+
+Crosstalk runs on your computer, not in the model, so it doesn't care which model is on the other end. If you try a provider that isn't marked as tested, reports are welcome.
 
 ## How it works
 
-```mermaid
-flowchart LR
-  A["Session on profile A"] -- "writes a message" --> F[("~/.claude-crosstalk")]
-  F -- "checked every 3 seconds" --> B["Session on profile B"]
-  B -- "writes its reply" --> F
-  F -- "checked every 3 seconds" --> A
-```
+<p align="center">
+  <img src="assets/how-it-works.svg" alt="Sessions on any profile or provider share the folder ~/.claude-crosstalk. A message starts a turn if the session is idle, is read on its next step if it is running tools, and arrives when the turn ends if it is in one long step." width="100%">
+</p>
 
 Each session records that it's running and checks its own inbox. When a message arrives:
 
@@ -106,7 +129,17 @@ To keep the folder somewhere else, set `CLAUDE_CROSSTALK_DIR` on every profile.
 - It only works between sessions on the same computer.
 - Messages take a few seconds to arrive; it isn't instant.
 - Records older than 7 days are cleared, which needs `node` on your PATH. Without it they just stay in the folder.
-- Long messages are capped at 20,000 characters. For anything bigger, write a file and send the path.
+- Messages are capped at 20,000 characters. For anything bigger, write a file and send the path.
+
+## Troubleshooting
+
+| What you see | What to do |
+|---|---|
+| A session isn't listed | Restart it, as sessions only load the plugin when they start. Check it's installed on that profile. |
+| "could be several sessions" | That profile has more than one session running, so use the whole address. |
+| Two profiles show the same name | Set `CLAUDE_CROSSTALK_NAME` differently on each. |
+| A message didn't wake a session | Run `/crosstalk` there. It may be off, or at its wake-up limit, which clears when you type. |
+| A provider can't send messages | Its model may not support tool calls. |
 
 ## Tested on
 
@@ -116,7 +149,7 @@ Windows 11 with Claude Code 2.1.318. macOS and Linux should work but haven't bee
 
 Crosstalk shares no logins or usage limits: each profile keeps its own. If you use several accounts or providers, their terms still apply, so check them.
 
-This is an independent project, not affiliated with or endorsed by Anthropic or any AI provider.
+This is an independent project, not affiliated with or endorsed by Anthropic, OpenAI, Google, Z.ai, DeepSeek or any other AI provider. Their names and logos belong to them and are used only to show what Crosstalk can connect to.
 
 ## Development
 

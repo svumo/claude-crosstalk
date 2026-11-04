@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Crosstalk logo: two overlapping speech bubbles">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#1b1b3a"/>
+      <stop offset="1" stop-color="#0b1020"/>
+    </linearGradient>
+    <linearGradient id="left" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="1" stop-color="#6d28d9"/>
+    </linearGradient>
+    <linearGradient id="right" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5eead4"/>
+      <stop offset="1" stop-color="#0d9488"/>
+    </linearGradient>
+    <path id="bubbleLeft" d="M148 98h130a64 64 0 0 1 64 64v82a64 64 0 0 1-64 64h-92l-62 56a8 8 0 0 1-13-6v-52a64 64 0 0 1-27-62v-82a64 64 0 0 1 64-64z"/>
+    <path id="bubbleRight" d="M234 188h130a64 64 0 0 1 64 64v82a64 64 0 0 1-27 62v52a8 8 0 0 1-13 6l-62-56h-92a64 64 0 0 1-64-64v-82a64 64 0 0 1 64-64z"/>
+    <clipPath id="onlyLeft"><use href="#bubbleLeft"/></clipPath>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#tile)"/>
+  <use href="#bubbleLeft" fill="url(#left)"/>
+  <use href="#bubbleRight" fill="url(#right)"/>
+  <g clip-path="url(#onlyLeft)"><use href="#bubbleRight" fill="#f8fafc"/></g>
+  <circle cx="226" cy="248" r="13" fill="#1b1b3a"/>
+  <circle cx="261" cy="248" r="13" fill="#1b1b3a"/>
+  <circle cx="296" cy="248" r="13" fill="#1b1b3a"/>
+</svg>
