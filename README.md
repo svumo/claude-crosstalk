@@ -90,12 +90,14 @@ Every message that arrives is also shown to you in the transcript, as `Crosstalk
 `/crosstalk open` opens a new terminal tab in your VS Code window, and the model can do the same: "Open a GLM session and ask it to review this file." This needs a small helper extension, because nothing outside VS Code can open a terminal inside it. Install it once:
 
 ```bash
-code --install-extension <the plugin's folder>/vscode/crosstalk-terminal-0.1.0.vsix
+code --install-extension <the plugin's folder>/vscode/crosstalk-terminal-0.2.0.vsix
 ```
 
 Or build it from `vscode/` with `npx @vscode/vsce package`. The helper only runs commands that start Claude Code, so a link from anywhere else can't run anything else through it. Without the helper, or outside VS Code, `open` starts a new Windows Terminal window. Other systems are not supported yet.
 
 If you start a profile some other way than `claude-<profile>`, tell Crosstalk once: `/crosstalk launch zai claude zai`.
+
+The new tab opens next to your terminal tabs in the editor area, like their `+` button, if you keep terminals there. Otherwise it opens in the bottom panel. To choose, set `crosstalkTerminal.location` in VS Code's settings: `auto`, `editor`, `split` (beside the active terminal) or `panel`.
 
 **Addresses** look like `profile/folder-xxxx`, such as `work/my-app-1a2b`. The profile name alone works when that profile has one session running.
 
