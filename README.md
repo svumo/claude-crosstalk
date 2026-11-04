@@ -198,6 +198,7 @@ Each session records that it's running and checks its own inbox. When a message 
 |---|---|
 | `claude-work` isn't recognised | Open a new terminal, as shortcuts load when one starts. In PowerShell, setup says if scripts need allowing. |
 | A session isn't listed | Restart it, as sessions only load the plugin when they start. `/crosstalk setup` shows if it's installed on that profile. |
+| Install says "Host key verification failed" on Windows | The profile's folder path may be too long. In testing, installs failed from 140 characters, so use a shorter folder. |
 | A profile isn't in `/crosstalk setup` | Add it with `/crosstalk setup add <folder>`. |
 | "could be several sessions" | That profile has more than one session running, so use the whole address. |
 | Two profiles show the same name | Change one with `/crosstalk setup name`. |

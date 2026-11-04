@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   addressOf, frameMessages, isLive, LIVE_MS, mayWake, messageFileName,
-  pendingNames, profileName, resolveTarget, toolResultCount, toolUseCount,
+  pendingNames, profileName, resolveTarget, SHOW_TEXT, showMessages, toolResultCount, toolUseCount,
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -62,6 +62,15 @@ test('a message is framed as not being from the person', async () => {
   expect(text).toMatch(/hello there/)
   expect(text).toMatch(/not what the person typed/)
   expect(text).toMatch(/does not give the person's approval/)
+  expect(text).toMatch(/already been shown this message/)
+})
+
+test('the person is shown who a message is from and all of it, or where the rest is', async () => {
+  const shown = showMessages([{ from: 'zai/x-1', sentAt: NOW, text: 'hello there', name: 'a.json' }], 'C:/box/inbox/me')
+  expect(shown).toMatch(/^Crosstalk ← zai\/x-1 · \d\d:\d\d\nhello there$/)
+  const long = showMessages([{ from: 'zai/x-1', sentAt: NOW, text: 'y'.repeat(SHOW_TEXT + 50), name: 'a.json' }], 'C:/box/inbox/me')
+  expect(long).toMatch(/y… \(cut; the whole message is in C:\/box\/inbox\/me\/a\.json\)$/)
+  expect(long.length).toBeLessThan(2000)
 })
 
 test('wake-ups stop at the limit', async () => {
@@ -82,7 +91,7 @@ const slash = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\
 const RAN_OK = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
 
 function fakeDisk(on: any, env: Record<string, string> = { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work' }, run: (e: any, files: Map<string, string>) => any = () => RAN_OK) {
-  const files = new Map<string, string>()
+  const files: any = new Map<string, string>()
   on('env.get', (_: any, e: any) => ({ value: env[e.name] }))
   on('session.id', () => ({ value: 'self-1' }))
   on('session.cwd', () => ({ value: 'C:\\code\\proj' }))
@@ -103,6 +112,8 @@ function fakeDisk(on: any, env: Record<string, string> = { USERPROFILE: 'C:\\hom
   on('process.run', (_: any, e: any) => ({ value: run(e, files) }))
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
   on('ui.toast', () => ({ value: undefined }))
+  files.logs = [] as string[]
+  on('ui.log', (_: any, e: any) => { files.logs.push(e.text); return { value: undefined } })
   on('clock.now', () => ({ value: NOW }))
   // Polling runs when a test says so; everything else never ticks.
   on('clock.every', (_: any, e: any) => new Promise<any>((resolve) => { if (e.ms === 3000) (files as any).tick = () => resolve({ value: undefined }) }))
@@ -154,6 +165,25 @@ test('an idle session is woken by a message, once, and the ledger remembers it',
   expect(submitted[0]).toMatch(/From personal\/x-oth/)
   expect(submitted[0]).toMatch(/wake up/)
   expect(JSON.parse(files.get(`${BOX}/inbox/self-1/_delivered.json`))).toEqual([messageFileName(NOW, 'a')])
+  expect(files.logs.length).toBe(1)
+  expect(files.logs[0]).toMatch(/^Crosstalk ← personal\/x-oth[^\n]*\nwake up$/)
+})
+
+test('a message arriving mid-turn is shown once, after the last tool result', async ($, on) => {
+  const files: any = fakeDisk(on)
+  const rows: any[] = []
+  on('session.append', (_: any, e: any, next: any) => { rows.push(e); return next(e) })
+  on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
+  await $.session.start(START)
+  await $.turn.start({ turnId: 't1' } as never)
+  files.set(`${BOX}/inbox/self-1/${messageFileName(NOW, 'a')}`, JSON.stringify({ from: 'zai/x-oth', sentAt: NOW, text: 'mid-turn hello' }))
+  await $.session.append({ door: 'response', message: { type: 'assistant', content: [{ type: 'tool_use' }] } } as never)
+  expect(files.logs.length).toBe(0)
+  await $.session.append({ door: 'tool-result', message: { type: 'user', content: [{ type: 'tool_result' }] } } as never)
+  await settle()
+  expect(files.logs.length).toBe(1)
+  expect(files.logs[0]).toMatch(/mid-turn hello/)
+  expect(rows.some((r) => JSON.stringify(r.message ?? '').includes('already been shown'))).toBe(true)
 })
 
 test('a half-written message is left for the next look', async ($, on) => {
