@@ -1,21 +1,11 @@
 {
   "name": "crosstalk",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Lets Claude Code sessions message each other, across profiles, accounts and AI providers on one computer.",
   "author": {
     "name": "svumo"
   },
   "license": "MIT",
   "homepage": "https://github.com/svumo/claude-crosstalk",
-  "repository": "https://github.com/svumo/claude-crosstalk",
-  "userConfig": {
-    "wakeLimit": {
-      "type": "number",
-      "title": "Wake-up limit",
-      "description": "How many messages in a row may start a turn by themselves before one waits for you to type. Stops two sessions replying to each other for ever.",
-      "default": 25,
-      "min": 1,
-      "max": 500
-    }
-  }
+  "repository": "https://github.com/svumo/claude-crosstalk"
 }

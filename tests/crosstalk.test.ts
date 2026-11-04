@@ -4,6 +4,10 @@ import {
   addressOf, frameMessages, isLive, LIVE_MS, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, toolResultCount, toolUseCount,
 } from '../hooks/core.mjs'
+import {
+  configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
+  providerHost, shortcutBlock, shortcutsIn,
+} from '../hooks/setup.mjs'
 
 const NOW = 1_000_000
 const rec = (id: string, profile: string, address: string, seenAt = NOW) => ({ id, profile, address, seenAt, cwd: 'x' })
@@ -73,9 +77,11 @@ test('tool calls and results are counted, so a message never lands between them'
 })
 
 // The mod itself, with a folder in memory standing for the disk. The host hands paths over in Windows spelling.
-const slash = (path: string) => path.replace(/\\/g, '/')
+const slash = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\/home\/me)/, '') // and may add a drive to a Unix path
 
-function fakeDisk(on: any, env: Record<string, string> = { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work' }) {
+const RAN_OK = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+
+function fakeDisk(on: any, env: Record<string, string> = { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work' }, run: (e: any, files: Map<string, string>) => any = () => RAN_OK) {
   const files = new Map<string, string>()
   on('env.get', (_: any, e: any) => ({ value: env[e.name] }))
   on('session.id', () => ({ value: 'self-1' }))
@@ -89,10 +95,12 @@ function fakeDisk(on: any, env: Record<string, string> = { USERPROFILE: 'C:\\hom
   })
   on('fs.list', (_: any, e: any) => {
     const prefix = `${slash(e.path)}/`
-    const names = [...files.keys()].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length)).filter((n) => !n.includes('/'))
-    return { value: names.map((name) => ({ name, kind: 'file', size: 1, mtimeMs: 1, isLink: false })) }
+    const rests = [...files.keys()].filter((k) => k.startsWith(prefix)).map((k) => k.slice(prefix.length))
+    if (rests.length === 0 && !(files as any).folders?.includes(slash(e.path))) throw new Error('ENOENT')
+    const names = [...new Set(rests.map((r) => r.split('/')[0]))]
+    return { value: names.map((name) => ({ name, kind: rests.includes(name) ? 'file' : 'dir', size: 1, mtimeMs: 1, isLink: false })) }
   })
-  on('process.run', () => ({ value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }))
+  on('process.run', (_: any, e: any) => ({ value: run(e, files) }))
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
   on('ui.toast', () => ({ value: undefined }))
   on('clock.now', () => ({ value: NOW }))
@@ -158,4 +166,212 @@ test('a half-written message is left for the next look', async ($, on) => {
   await settle()
   expect(submitted.length).toBe(0)
   expect(files.has(`${BOX}/inbox/self-1/_delivered.json`)).toBe(false)
+})
+
+// Setup: people's profiles are laid out differently, so each way of finding one is held here.
+const HOME_ENV = { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude' }
+const PS = 'C:/home/Documents/PowerShell/Microsoft.PowerShell_profile.ps1'
+const seed = (files: Map<string, string>, folder: string, extra: Record<string, string> = {}) => {
+  files.set(`${folder}/settings.json`, '{}')
+  for (const [k, v] of Object.entries(extra)) files.set(`${folder}/${k}`, v)
+}
+const INSTALLED = JSON.stringify({ plugins: { 'crosstalk@claude-crosstalk': [{}] } })
+
+// pwsh says where its profile is; `claude plugin install` writes the record a real one would.
+function computerRun(calls: any[], policy = 'RemoteSigned', installs = true) {
+  return (e: any, files: Map<string, string>) => {
+    calls.push(e)
+    if (e.argv[0] === 'pwsh') return { ...RAN_OK, stdout: `${PS.replace(/\//g, '\\')}\r\n${policy}\r\n` }
+    if (e.argv[0] === 'powershell') throw new Error('not found')
+    if (e.argv.includes('plugin')) {
+      if (!installs) return { ...RAN_OK, exitCode: 1 }
+      files.set(`${slash(e.init.env.CLAUDE_CONFIG_DIR)}/plugins/installed_plugins.json`, INSTALLED)
+    }
+    return RAN_OK
+  }
+}
+const say = async ($: any, args: string) => (await $.command.run({ command: 'crosstalk', args })).text as string
+const installsIn = (calls: any[]) => calls.filter((c) => c.argv.includes('plugin')).map((c) => slash(c.init.env.CLAUDE_CONFIG_DIR))
+
+test('home folders are told apart from what is not a profile', async () => {
+  const d = (name: string, kind = 'dir', isLink = false) => ({ name, kind, isLink })
+  expect(homeCandidates([d('.claude'), d('.claude-work'), d('.claude-crosstalk'), d('.claude.json', 'file'), d('.claude-link', 'other', true), d('claude-shared'), d('.config')]))
+    .toEqual(['.claude', '.claude-work', '.claude-link'])
+  expect(looksLikeProfile([{ name: 'projects' }])).toBe(true)
+  expect(looksLikeProfile([{ name: 'notes.txt' }])).toBe(false)
+})
+
+test('a launcher in a shell file is read for its folder, however it is written', async () => {
+  const dirs = (text: string, home = '/home/me') => configDirsInShell(text, home)
+  expect(dirs('export CLAUDE_CONFIG_DIR=~/.claude-work')).toEqual(['/home/me/.claude-work'])
+  expect(dirs('alias w="CLAUDE_CONFIG_DIR=$HOME/.claude-work claude"')).toEqual(['/home/me/.claude-work'])
+  expect(dirs('CLAUDE_CONFIG_DIR=/opt/my-claude claude "$@"')).toEqual(['/opt/my-claude'])
+  expect(dirs('export CLAUDE_CONFIG_DIR="/opt/my claude"')).toEqual(['/opt/my claude'])
+  expect(dirs('$env:CLAUDE_CONFIG_DIR = "$env:USERPROFILE\\.claude-glm"', 'C:\\home')).toEqual(['C:/home/.claude-glm'])
+  expect(dirs('CLAUDE_CONFIG_DIR=/c/profiles/glm claude', 'C:\\home')).toEqual(['C:/profiles/glm'])
+  expect(dirs('# CLAUDE_CONFIG_DIR=/old')).toEqual([])
+  expect(dirs('export CLAUDE_CONFIG_DIR="$1"')).toEqual([])
+  expect(dirs('$env:CLAUDE_CONFIG_DIR = $was')).toEqual([])
+  expect(dirs('if ($env:CLAUDE_CONFIG_DIR -ne "x") {}')).toEqual([])
+})
+
+test('nothing but a folder or a host comes out of what is read', async () => {
+  const shell = 'export ANTHROPIC_AUTH_TOKEN=sk-secret\nexport CLAUDE_CONFIG_DIR=/opt/c'
+  expect(JSON.stringify(configDirsInShell(shell, '/home/me'))).not.toMatch(/secret/)
+  expect(providerHost(JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/key-secret?t=secret', ANTHROPIC_AUTH_TOKEN: 'secret' } }))).toBe('api.z.ai')
+  expect(providerHost('not json')).toBe('')
+})
+
+test('shortcuts go in a marked block, and writing them twice changes nothing', async () => {
+  const work = { name: 'work', folder: 'C:/home/.claude-work' }
+  for (const kind of ['powershell', 'posix']) {
+    const once = mergeBlock('# mine\r\n', shortcutBlock(kind, [work]))
+    expect(mergeBlock(once, shortcutBlock(kind, [work]))).toBe(once)
+    expect(once.startsWith('# mine')).toBe(true)
+    expect(shortcutsIn(once)).toEqual([work])
+    expect(hasLauncher(once, work.folder, 'C:/home')).toBe(false) // its own block is no person's launcher
+  }
+  expect(hasLauncher('$env:CLAUDE_CONFIG_DIR = "C:\\HOME\\.claude-work"', work.folder, 'C:/home')).toBe(true)
+})
+
+test('a name already used in a shell file is noticed, and a bad name or folder is refused', async () => {
+  expect(nameTaken('alias claude-work="x"', 'work')).toBe(true)
+  expect(nameTaken('function claude-work { }', 'work')).toBe(true)
+  expect(nameTaken('claude-work() { x; }', 'work')).toBe(true)
+  expect(nameTaken('claude-workshop() { x; }', 'work')).toBe(false)
+  expect(isSafeName('work_2')).toBe(true)
+  expect(isSafeName('a;rm')).toBe(false)
+  expect(isSafeName('default')).toBe(false)
+  expect(isSafeFolder("C:/Users/O'Brien/.claude-x")).toBe(true)
+  expect(isSafeFolder('/x/$(rm)')).toBe(false)
+  expect(isSafeFolder('/x/"y')).toBe(false)
+})
+
+test('setup finds profiles every way, and changes nothing until told to', async ($, on) => {
+  const calls: any[] = []
+  const files: any = fakeDisk(on, HOME_ENV, computerRun(calls))
+  seed(files, 'C:/home/.claude', { 'plugins/installed_plugins.json': INSTALLED })
+  seed(files, 'C:/home/.claude-work')
+  seed(files, 'C:/home/.claude-glm', { 'settings.json': JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'https://api.z.ai/anthropic' } }) })
+  seed(files, 'D:/profiles/odd')
+  files.set('C:/home/.claude-empty/notes.txt', 'x')
+  files.set(PS, '$env:CLAUDE_CONFIG_DIR = "$env:USERPROFILE\\.claude-glm"\n$env:CLAUDE_CONFIG_DIR = "D:\\profiles\\odd"\n')
+  await $.session.start(START)
+  const before = JSON.stringify([...files.entries()])
+  const text = await say($, 'setup')
+  expect(text).toMatch(/found 4 Claude Code profiles/)
+  expect(text).toMatch(/default: ~\/\.claude\n.*this session.*Crosstalk installed.*start with claude/)
+  expect(text).toMatch(/work: ~\/\.claude-work\n.*your home folder.*needs Crosstalk.*claude-work \(new\)/)
+  expect(text).toMatch(/glm: ~\/\.claude-glm\n.*uses api\.z\.ai.*start with your own command/)
+  expect(text).toMatch(/odd: D:\/profiles\/odd\n.*start with your own command/)
+  expect(text).not.toMatch(/empty/)
+  expect(text).toMatch(/Nothing has changed yet/)
+  expect(JSON.stringify([...files.entries()])).toBe(before)
+  expect(installsIn(calls)).toEqual([])
+})
+
+test('setup yes installs where needed, adds only missing shortcuts, and a second run does nothing', async ($, on) => {
+  const calls: any[] = []
+  const files: any = fakeDisk(on, HOME_ENV, computerRun(calls))
+  seed(files, 'C:/home/.claude', { 'plugins/installed_plugins.json': INSTALLED })
+  seed(files, 'C:/home/.claude-work')
+  seed(files, 'C:/home/.claude-glm')
+  const mine = '$env:CLAUDE_CONFIG_DIR = "$env:USERPROFILE\\.claude-glm"\n'
+  files.set(PS, mine)
+  await $.session.start(START)
+  const text = await say($, 'setup yes')
+  expect(installsIn(calls).sort()).toEqual(['C:/home/.claude-glm', 'C:/home/.claude-work'])
+  expect(calls.find((c) => c.argv.includes('plugin')).argv).toEqual(['claude', 'plugin', 'install', 'crosstalk', '--marketplace', 'svumo/claude-crosstalk'])
+  expect(files.get(PS)).toMatch(/function claude-work /)
+  expect(files.get(PS)).not.toMatch(/claude-glm \{/) // has its own launcher
+  expect(files.get(PS).startsWith(mine)).toBe(true)
+  expect(files.get(`${PS}.crosstalk-backup`)).toBe(mine)
+  expect(text).toMatch(/log in the first time/)
+  const after = files.get(PS)
+  calls.length = 0
+  expect(await say($, 'setup yes')).toMatch(/Nothing to do/)
+  expect(files.get(PS)).toBe(after)
+  expect(installsIn(calls)).toEqual([])
+})
+
+test('the list can be corrected by hand: a folder added, one left out, a name changed', async ($, on) => {
+  const files: any = fakeDisk(on, HOME_ENV, computerRun([]))
+  seed(files, 'C:/home/.claude')
+  seed(files, 'C:/home/.claude-backup')
+  seed(files, 'D:/my profiles/x')
+  await $.session.start(START)
+  expect(await say($, 'setup add "D:\\my profiles\\x" client')).toMatch(/client: D:\/my profiles\/x\n.*your list/)
+  expect(await say($, 'setup add D:\\missing')).toMatch(/has to exist/)
+  const left = await say($, 'setup skip backup')
+  expect(left).toMatch(/Leaving out backup/)
+  expect(left).not.toMatch(/backup: /)
+  expect(await say($, 'setup skip nobody')).toMatch(/Names: default, client/)
+  expect(await say($, 'setup name client acme')).toMatch(/acme: D:\/my profiles\/x/)
+  expect(await say($, 'setup name acme default')).toMatch(/Usage/)
+  expect(await say($, 'setup name acme x;y')).toMatch(/Usage/)
+})
+
+test('a name saved by setup is what a session goes by', async ($, on) => {
+  const files = fakeDisk(on)
+  files.set(`${BOX}/setup.json`, JSON.stringify({ names: { 'C:/home/.claude-work': 'acme' } }))
+  await $.session.start(START)
+  expect(JSON.parse(files.get(`${BOX}/sessions/self-1.json`)!).address).toBe('acme/proj-self')
+})
+
+test('a failed install gives the line to run, and an unsafe shell file is left alone', async ($, on) => {
+  const files: any = fakeDisk(on, HOME_ENV, computerRun([], 'RemoteSigned', false))
+  seed(files, 'C:/home/.claude', { 'plugins/installed_plugins.json': INSTALLED })
+  seed(files, 'C:/home/.claude-work')
+  const utf16 = '\uFFFD\0m\0i\0n\0e\0'
+  files.set(PS, utf16)
+  await $.session.start(START)
+  const text = await say($, 'setup yes')
+  expect(text).toMatch(/Couldn't install on work/)
+  expect(text).toMatch(/\$env:CLAUDE_CONFIG_DIR = "C:\\home\\\.claude-work"; claude plugin install/)
+  expect(await say($, 'setup')).toMatch(/isn't saved as UTF-8/)
+  expect(files.get(PS)).toBe(utf16)
+  expect(files.has(`${PS}.crosstalk-backup`)).toBe(false)
+})
+
+test('where PowerShell runs no scripts, no profile is written, and the person is told how', async ($, on) => {
+  const files: any = fakeDisk(on, HOME_ENV, computerRun([], 'Restricted'))
+  seed(files, 'C:/home/.claude', { 'plugins/installed_plugins.json': INSTALLED })
+  seed(files, 'C:/home/.claude-work')
+  await $.session.start(START)
+  const text = await say($, 'setup yes')
+  expect(text).toMatch(/Set-ExecutionPolicy -Scope CurrentUser RemoteSigned/)
+  expect(files.has(PS)).toBe(false)
+})
+
+test('on macOS or Linux, shortcuts go in the file of the shell in use', async ($, on) => {
+  const calls: any[] = []
+  const files: any = fakeDisk(on, { HOME: '/home/me', SHELL: '/bin/zsh', CLAUDE_CONFIG_DIR: '/home/me/.claude' }, computerRun(calls))
+  seed(files, '/home/me/.claude', { 'plugins/installed_plugins.json': INSTALLED })
+  seed(files, '/home/me/.claude-work')
+  await $.session.start(START)
+  await say($, 'setup yes')
+  const zsh = [...files.keys()].find((k: string) => k.endsWith('/.zshrc'))!
+  expect(files.get(zsh)).toMatch(/claude-work\(\) \{ CLAUDE_CONFIG_DIR="[^"]*\/home\/me\/\.claude-work" claude "\$@"; \}/)
+  expect(calls.some((c) => c.argv[0] === 'pwsh')).toBe(false)
+})
+
+test('add makes a new profile with a shortcut, and refuses what is there or a bad name', async ($, on) => {
+  const calls: any[] = []
+  const files: any = fakeDisk(on, HOME_ENV, computerRun(calls))
+  seed(files, 'C:/home/.claude', { 'plugins/installed_plugins.json': INSTALLED })
+  seed(files, 'C:/home/.claude-old')
+  await $.session.start(START)
+  const text = await say($, 'add Work')
+  expect(installsIn(calls)).toEqual(['C:/home/.claude-work'])
+  expect(files.get(PS)).toMatch(/function claude-work /)
+  expect(text).toMatch(/run claude-work.*log in/)
+  expect(await say($, 'add old')).toMatch(/already there/)
+  expect(await say($, 'add a;b')).toMatch(/Usage/)
+  expect(await say($, 'add')).toMatch(/Usage/)
+})
+
+test('the wake-up limit is set by a variable', async ($, on) => {
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CROSSTALK_WAKE_LIMIT: '3' })
+  await $.session.start(START)
+  expect(await say($, '')).toMatch(/of 3\./)
 })

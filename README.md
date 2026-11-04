@@ -3,9 +3,9 @@
 </p>
 
 <p align="center">
-  <a href="#install"><img src="https://img.shields.io/badge/install-one_line-8b5cf6?style=for-the-badge&labelColor=1b1b3a" alt="Install in one line"></a>
-  <a href="#what-it-works-with"><img src="https://img.shields.io/badge/works_with-any_provider-2dd4bf?style=for-the-badge&labelColor=1b1b3a" alt="Works with any provider Claude Code can use"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-7dd3fc?style=for-the-badge&labelColor=1b1b3a" alt="MIT licence"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/install-one_line-6d28d9?style=for-the-badge&labelColor=1b1b3a" alt="Install in one line"></a>
+  <a href="#what-it-works-with"><img src="https://img.shields.io/badge/works_with-any_provider-0f766e?style=for-the-badge&labelColor=1b1b3a" alt="Works with any provider Claude Code can use"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-0369a1?style=for-the-badge&labelColor=1b1b3a" alt="MIT licence"></a>
 </p>
 
 <p align="center">
@@ -14,7 +14,7 @@
 </p>
 
 <p align="center">
-  <img src="assets/example.svg" alt="You ask Claude Code, acting as orchestrator, to review, test and document your work. It sends jobs through Crosstalk to sessions on three Claude accounts and on other AI providers: GPT and Gemini through a gateway, GLM, DeepSeek and more. Each wakes up by itself and replies through Crosstalk, and the orchestrator reports back to you." width="100%">
+  <img src="assets/example.svg" alt="You ask Claude Code, acting as orchestrator, to review, test and document your work. It sends jobs through Crosstalk to sessions on three Claude accounts and on other AI providers: GPT and Gemini through a gateway, GLM, DeepSeek and more. Each wakes up by itself and replies through Crosstalk, and the orchestrator tells you what they found." width="100%">
 </p>
 
 <p align="center">
@@ -28,13 +28,27 @@
 
 ## Install
 
-At the prompt of a terminal session:
+**1. Install it.** At the prompt of a terminal session, then restart that session:
 
 ```text
 /plugin install crosstalk --marketplace svumo/claude-crosstalk
 ```
 
-Then restart any session that was already open. That's it for a single profile.
+**2. Connect your other profiles.** Skip this if you only have one.
+
+```text
+/crosstalk setup
+```
+
+It lists the profiles it found and what it would do, without changing anything. If that looks right:
+
+```text
+/crosstalk setup yes
+```
+
+That installs Crosstalk on each profile and gives any profile with no way to start it a short command, such as `claude-work`. Open a new terminal, start your sessions, and they can reach each other.
+
+Don't have a second profile yet? `/crosstalk add work` makes one. Run `claude-work` in a new terminal and log in.
 
 <details>
 <summary><b>From a shell, or the desktop app</b></summary>
@@ -62,6 +76,9 @@ Just ask, in plain words:
 | `/crosstalk` | Shows this session's address and who it can reach |
 | `/crosstalk off` | Pauses it: messages wait |
 | `/crosstalk on` | Turns it back on |
+| `/crosstalk setup` | Shows your profiles and what setup would do. Changes nothing |
+| `/crosstalk setup yes` | Does it |
+| `/crosstalk add <name>` | Makes a new profile, ready to log in to |
 
 **Addresses** look like `profile/folder-xxxx`, such as `work/my-app-1a2b`. The profile name alone works when that profile has one session running.
 
@@ -71,13 +88,43 @@ Crosstalk carries the messages; it doesn't plan the work. Whichever session you 
 
 Claude Code's built-in messaging only reaches sessions on the same profile, because each profile keeps its own list of sessions. A session on one account can't see a session on another. Crosstalk connects them through a folder they can all read.
 
-A *profile* is a separate Claude Code config folder, chosen with `CLAUDE_CONFIG_DIR`. Each one keeps its own login, so give each account its own:
+A *profile* is a separate Claude Code config folder with its own login, so each account gets its own.
+
+**Everyone sets these up differently, so setup looks in several places:**
+
+- this session's own profile
+- `.claude` and `.claude-*` folders in your home folder
+- any `CLAUDE_CONFIG_DIR` in your PowerShell profile, `.bashrc`, `.zshrc` and similar, which is how it finds folders kept somewhere else
+- folders you've told it about
+
+If you already start a profile your own way, it leaves that alone and adds no shortcut. If the list isn't right, correct it:
+
+| Command | What it does |
+|---|---|
+| `/crosstalk setup add <folder> [name]` | Adds a profile it missed. Put a path with spaces in double quotes |
+| `/crosstalk setup skip <name>` | Leaves one out, such as an old backup |
+| `/crosstalk setup name <name> <new name>` | Changes a profile's name |
+
+**Names** come from the folder unless you change them: `~/.claude` is `default`, `~/.claude-work` is `work`, and any other folder goes by its own name.
+
+<details>
+<summary><b>What setup changes on your computer</b></summary>
+
+- It runs `claude plugin install` for each profile that needs it.
+- It adds shortcuts to your PowerShell profile, and your `.bashrc` or `.zshrc`, inside a marked `crosstalk shortcuts` block. Running it again updates that block and nothing else. The file as it was is saved beside it, ending `.crosstalk-backup`.
+- From your shell files it only takes folder paths, and from a profile's settings only the provider's host name. It doesn't copy or show keys.
+
+If PowerShell isn't allowed to run its profile, setup tells you the command to allow it and doesn't write the file. If an install fails, it gives you the line to run yourself.
+
+</details>
+
+<details>
+<summary><b>Doing it by hand</b></summary>
 
 ```bash
 # macOS or Linux
-export CLAUDE_CONFIG_DIR=~/.claude-work
-claude plugin install crosstalk --marketplace svumo/claude-crosstalk
-claude
+CLAUDE_CONFIG_DIR=~/.claude-work claude plugin install crosstalk --marketplace svumo/claude-crosstalk
+CLAUDE_CONFIG_DIR=~/.claude-work claude
 ```
 
 ```powershell
@@ -87,9 +134,7 @@ claude plugin install crosstalk --marketplace svumo/claude-crosstalk
 claude
 ```
 
-Repeat for each profile, then open a session on each. Run `/crosstalk` and they'll list each other.
-
-**Names** come from the folder: `~/.claude` is `default`, `~/.claude-work` is `work`, and any other folder goes by its own name. To choose a name, set `CLAUDE_CROSSTALK_NAME`.
+</details>
 
 ## What it works with
 
@@ -98,11 +143,29 @@ Repeat for each profile, then open a session on each. Run `/crosstalk` and they'
 | Provider | How it connects | Status |
 |---|---|---|
 | Claude, on one or many accounts | Directly | Tested |
-| GLM | Z.ai's Anthropic-compatible endpoint | Tested |
-| DeepSeek and others with an Anthropic-compatible endpoint | Directly, using `ANTHROPIC_BASE_URL` | Should work, not tested |
-| GPT, Gemini and others | Through a gateway such as LiteLLM | Should work, not tested |
+| GPT | Through a gateway such as LiteLLM | Should work, not tested |
+| Gemini | Through a gateway such as LiteLLM | Should work, not tested |
+| Others: GLM, DeepSeek and more | Their Anthropic-compatible endpoint, or a gateway | GLM tested, the rest should work |
 
 Crosstalk runs on your computer, not in the model, so it doesn't care which model is on the other end. If you try a provider that isn't marked as tested, reports are welcome.
+
+<details>
+<summary><b>Adding a provider</b></summary>
+
+Make a profile for it with `/crosstalk add glm`, then put the provider's details in that profile's `settings.json`, here `~/.claude-glm/settings.json`:
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "your key"
+  }
+}
+```
+
+That's Z.ai's endpoint for GLM. For another provider, use its own Anthropic-compatible address, or your gateway's. Start it with `claude-glm`, then run `/crosstalk setup` from any profile: the provider shows beside the name.
+
+</details>
 
 ## How it works
 
@@ -116,11 +179,9 @@ Each session records that it's running and checks its own inbox. When a message 
 - **If it's working,** the model reads the message on its next step, once the current tool calls finish.
 - **If it's in one long step with no tools,** the message arrives when that turn ends.
 
-To keep the folder somewhere else, set `CLAUDE_CROSSTALK_DIR` on every profile.
-
 ## Costs and safety
 
-- **Wake-ups use tokens.** Each message that wakes a session uses that profile's tokens or usage. After 25 wake-ups in a row, new messages wait until you type, so two sessions can't keep replying to each other forever. Change this with the `wakeLimit` option.
+- **Wake-ups use tokens.** Each message that wakes a session uses that profile's tokens or usage. After 25 wake-ups in a row, new messages wait until you type, so two sessions can't keep replying to each other forever. To change the number, set `CLAUDE_CROSSTALK_WAKE_LIMIT`.
 - **Messages are plain text on disk,** so don't send passwords or keys.
 - **Messages aren't your approval.** Any program on your computer can write to the folder, so each message is presented to the model as information from another session, and it's told to ask you before doing anything that needs your approval. That's an instruction to the model, not a hard block, so keep your normal permission settings on.
 
@@ -135,15 +196,27 @@ To keep the folder somewhere else, set `CLAUDE_CROSSTALK_DIR` on every profile.
 
 | What you see | What to do |
 |---|---|
-| A session isn't listed | Restart it, as sessions only load the plugin when they start. Check it's installed on that profile. |
+| `claude-work` isn't recognised | Open a new terminal, as shortcuts load when one starts. In PowerShell, setup says if scripts need allowing. |
+| A session isn't listed | Restart it, as sessions only load the plugin when they start. `/crosstalk setup` shows if it's installed on that profile. |
+| A profile isn't in `/crosstalk setup` | Add it with `/crosstalk setup add <folder>`. |
 | "could be several sessions" | That profile has more than one session running, so use the whole address. |
-| Two profiles show the same name | Set `CLAUDE_CROSSTALK_NAME` differently on each. |
+| Two profiles show the same name | Change one with `/crosstalk setup name`. |
 | A message didn't wake a session | Run `/crosstalk` there. It may be off, or at its wake-up limit, which clears when you type. |
 | A provider can't send messages | Its model may not support tool calls. |
 
+## Settings
+
+Optional environment variables, set before you start a session:
+
+| Variable | What it does | Default |
+|---|---|---|
+| `CLAUDE_CROSSTALK_NAME` | This session's profile name, over any other | From the folder |
+| `CLAUDE_CROSSTALK_DIR` | The shared folder. Set the same on every profile | `~/.claude-crosstalk` |
+| `CLAUDE_CROSSTALK_WAKE_LIMIT` | Wake-ups in a row before messages wait for you | 25 |
+
 ## Tested on
 
-Windows 11 with Claude Code 2.1.318. macOS and Linux should work but haven't been tested, so reports are welcome.
+Windows 11 with Claude Code 2.1.318, using PowerShell 7 and Git Bash. macOS, Linux and zsh should work but haven't been run for real, so reports are welcome.
 
 ## Accounts and terms
 
@@ -158,6 +231,8 @@ claude plugin validate .
 claude plugin test .
 claude --plugin-dir .
 ```
+
+To try `/crosstalk setup` without touching your real shell files or profiles, set `CLAUDE_CROSSTALK_HOME` to an empty folder, which stands in for your home folder. `CLAUDE_CROSSTALK_MARKETPLACE` changes where it installs from.
 
 ## Licence
 
