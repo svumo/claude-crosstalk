@@ -15,7 +15,7 @@
 
 import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
-  pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
+  pendingNames, profileName, resolveTarget, toolResultCount, toolUseCount,
 } from "./core.mjs";
 import {
   configDirsInShell, homeCandidates, isInstalled, isSafeFolder, isSafeName, isUnreadable, looksLikeProfile,
@@ -579,12 +579,9 @@ async function unmark($, batch) {
   await saveDelivered($);
 }
 
-// Called only once a batch is on its way to the model: the person sees the toast and, in the
-// transcript, the messages themselves, so nothing depends on the model passing them on.
 function noteArrival($, batch) {
   const from = [...new Set(batch.map((m) => m.from))].join(", ");
   $.ui.toast(`Crosstalk: ${batch.length === 1 ? "a message" : `${batch.length} messages`} from ${from}`);
-  $.ui.log(showMessages(batch, `${root}/inbox/${me.id}`));
 }
 
 // Between turns: a message starts a turn, up to the limit.
