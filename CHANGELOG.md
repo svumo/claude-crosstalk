@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0
+
+- `/crosstalk open <profile> --model <m> --mode <p> [message]`: the slash command can set the new session's model and permission mode too. Modes are matched whatever their case.
+- `open` works on macOS and Linux. On macOS it opens a Terminal window. On Linux it opens a new tmux window when you're in tmux, otherwise the first desktop terminal it finds; `CLAUDE_CROSSTALK_TERMINAL` picks one. Not yet tried on real machines.
+- The folder-trust mark is read back after it's written and put back if a session already running on that profile wrote over it.
+- `scripts/install-local.mjs` installs the committed code on every profile on this computer, from whichever marketplace each one uses.
+
 ## 1.3.0
 
 - The `open` tool takes `model` and `permissionMode`, so the model can start a session on, say, Sonnet in plan mode. Left out, the profile's own launch command is used. `bypassPermissions` isn't offered (build choice); a profile's saved `/crosstalk launch` command can still include it.
