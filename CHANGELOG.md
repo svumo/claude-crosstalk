@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.0
+
+- The `open` tool takes `model` and `permissionMode`, so the model can start a session on, say, Sonnet in plan mode. Left out, the profile's own launch command is used. `bypassPermissions` isn't offered (build choice); a profile's saved `/crosstalk launch` command can still include it.
+- `open` marks the folder as trusted in the profile it starts, so a profile that hasn't opened this folder before no longer waits at "Is this a project you trust?" and misses its first message. Build choice: the opening session already runs in this folder, so the trust is carried over only to the session you asked for. If the record can't be updated, the session still opens and Crosstalk says it may stop at the trust screen.
+
 ## 1.2.0
 
 - Every message that arrives is shown to you in the transcript, idle or mid-turn, so you see replies without asking. The model is told you've seen it, so it doesn't repeat it back.
