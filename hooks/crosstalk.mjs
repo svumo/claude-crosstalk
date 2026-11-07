@@ -17,7 +17,8 @@ import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
   chooseOpenIn, findOpened, HELPER_ID, isSafeLaunch, launchFor, OPEN_IN, PERMISSION_MODES, trustProject,
-  vscodeLink, windowArgv, withLaunchFlags,
+  vscodeLink, windowArgv, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
+  LINUX_TERMINALS,
 } from "./core.mjs";
 import {
   configDirsInShell, homeCandidates, isInstalled, isSafeFolder, isSafeName, isUnreadable, looksLikeProfile,
@@ -35,6 +36,9 @@ const OPEN = "mcp__crosstalk__open";
 // How long a session being opened has to show up, looked for once a second.
 const OPEN_WAIT_S = 90;
 const PROFILE_WORD = /^[a-z0-9][a-z0-9_-]{0,30}$/;
+// Marking a folder trusted: how many goes, and how long to wait before reading it back.
+const TRUST_TRIES = 3;
+const TRUST_CHECK_MS = 300;
 const MARKETPLACE = "svumo/claude-crosstalk";
 
 let limit = 25;
@@ -181,7 +185,11 @@ export function register(on) {
       return { text: await addProfile($, String(words[1] ?? "").toLowerCase()) };
     }
     if (word === "open") {
-      const opened = await openSession($, String(words[1] ?? "").toLowerCase(), words.slice(2).join(" "));
+      const parts = parseOpenArgs(words.slice(1));
+      if (parts.error) {
+        return { text: parts.error };
+      }
+      const opened = await openSession($, parts.profile, parts.message, { model: parts.model, permissionMode: parts.permissionMode });
       return { text: opened.error ?? opened.text };
     }
     if (word === "open-in") {
@@ -568,23 +576,33 @@ async function trustFolder($, pc, setup, profile) {
   }
   let isTrusted = false;
   for (const path of paths) {
+    isTrusted = (await trustFile($, path)) || isTrusted;
+  }
+  return isTrusted;
+}
+
+// A session already running on that profile rewrites the file now and then, and may write over
+// the change with its own copy. So the file is read back after a moment, and marked again if the
+// mark is gone. Returns true when the file says trusted.
+async function trustFile($, path) {
+  for (let attempt = 0; attempt < TRUST_TRIES; attempt += 1) {
     const text = await readText($, path);
     if (text === null) {
-      continue;
+      return false;
     }
     const next = trustProject(text, me.cwd);
     if (next === null) {
-      isTrusted = isTrusted || parsesAsObject(text); // already trusted, or not safe to touch
-      continue;
+      return parsesAsObject(text); // already trusted, or not safe to touch
     }
     try {
       await $.fs.write(path, next);
-      isTrusted = true;
     } catch {
-      // leave it; the launch still goes ahead
+      return false; // the launch still goes ahead
     }
+    await $.clock.sleep(TRUST_CHECK_MS);
   }
-  return isTrusted;
+  const last = await readText($, path);
+  return last !== null && trustProject(last, me.cwd) === null && parsesAsObject(last);
 }
 
 function parsesAsObject(text) {
@@ -601,7 +619,7 @@ function parsesAsObject(text) {
 // or { error }.
 async function openSession($, profile, message, opts = {}) {
   if (!PROFILE_WORD.test(profile)) {
-    return { error: "Usage: /crosstalk open <profile> [first message], such as /crosstalk open zai say hello." };
+    return { error: "Usage: /crosstalk open <profile> [--model <model>] [--mode <permission mode>] [first message], such as /crosstalk open zai --mode plan say hello." };
   }
   const setup = await readJson($, `${root}/setup.json`, {});
   const flagged = withLaunchFlags(launchFor(profile, setup), opts);
@@ -621,20 +639,47 @@ async function openSession($, profile, message, opts = {}) {
   const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper);
   const since = await $.clock.now();
   let ran = null;
+  let place = "a new terminal window";
   if (choice.where === "vscode") {
+    place = "a new VS Code terminal";
     ran = await runCode($, pc, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: me.cwd, cmd: command })]);
-  } else if (pc.isWindows) {
-    ran = await $.process.run(windowArgv(me.cwd, command), { timeoutMs: 30_000 }).catch(() => null);
   } else {
-    return { error: "A new terminal window is only opened on Windows so far. In VS Code, install the Crosstalk terminal helper and use /crosstalk open-in vscode." };
+    const opener = pc.isWindows ? { argv: windowArgv(me.cwd, command) } : await unixWindow($, command);
+    if (opener.error) {
+      return { error: opener.error };
+    }
+    place = opener.place ?? place;
+    ran = await $.process.run(opener.argv, { timeoutMs: 30_000 }).catch(() => null);
   }
   if (!ran || ran.exitCode !== 0) {
-    return { error: `Couldn't open a ${choice.where === "vscode" ? "VS Code terminal" : "terminal window"}${ran?.stderr ? `: ${ran.stderr.trim().slice(0, 200)}` : "."}` };
+    return { error: `Couldn't open ${place}${ran?.stderr ? `: ${ran.stderr.trim().slice(0, 200)}` : "."}` };
   }
-  void watchOpened($, profile, since - 2_000, message);
-  const place = choice.where === "vscode" ? "a new VS Code terminal" : "a new terminal window";
+  void watchOpened($, profile, since - 2_000, message).catch(() => {});
   const trust = isTrusted ? "" : ` Crosstalk couldn't mark this folder trusted for ${profile}, so it may stop at the folder-trust screen until someone answers it.`;
   return { text: `Opening ${profile} (${command}) in ${place}${choice.why ? `, as ${choice.why}` : ""}. Crosstalk says here when it is up${message.trim() ? ", then sends it your message" : ""}.${trust}` };
+}
+
+// A new terminal on macOS (Terminal.app) or Linux (the first terminal found). Returns
+// { argv, place } or { error }.
+async function unixWindow($, command) {
+  const system = await $.process.run(["uname", "-s"], { timeoutMs: 10_000 }).catch(() => null);
+  if (String(system?.stdout ?? "").trim() === "Darwin") {
+    return { argv: macArgv(me.cwd, command), place: "a new Terminal window" };
+  }
+  const candidates = linuxCandidates({
+    wanted: await $.env.get("CLAUDE_CROSSTALK_TERMINAL"),
+    inTmux: Boolean(await $.env.get("TMUX")),
+    hasDisplay: Boolean((await $.env.get("DISPLAY")) || (await $.env.get("WAYLAND_DISPLAY"))),
+  });
+  const found = candidates.length
+    ? await $.process.run(whichArgv(candidates), { timeoutMs: 10_000 }).catch(() => null)
+    : null;
+  const terminal = String(found?.stdout ?? "").trim();
+  if (!LINUX_TERMINALS.includes(terminal)) {
+    return { error: `Couldn't find a terminal to open: Crosstalk looks for ${LINUX_TERMINALS.join(", ")}${candidates.includes("tmux") ? "" : " (tmux only from inside tmux)"}, and the desktop ones need a display. Set CLAUDE_CROSSTALK_TERMINAL to choose one, or use VS Code with the Crosstalk terminal helper.` };
+  }
+  const shell = await $.env.get("SHELL");
+  return { argv: linuxArgv(terminal, me.cwd, command, shell), place: terminal === "tmux" ? "a new tmux window" : `a new ${terminal} window` };
 }
 
 async function watchOpened($, profile, since, message) {
@@ -705,7 +750,7 @@ async function startUp($) {
     },
     isDeferred: false,
   });
-  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. open <profile> [message] starts one; open-in and launch set how; setup connects profiles; add <name> makes one; off and on pause it." });
+  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. open <profile> [--model m] [--mode p] [message] starts one; open-in and launch set how; setup connects profiles; add <name> makes one; off and on pause it." });
   $.clock.every(BEAT_MS, () => beat($).catch(() => {}));
   $.clock.every(POLL_MS, () => poll($).catch(() => {}));
   void prune($);

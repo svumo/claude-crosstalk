@@ -152,14 +152,38 @@ const MODEL_WORD = /^[A-Za-z0-9_.-]+$/;
 // rule the launch check and the VS Code helper hold. Returns { command } or { error }.
 export function withLaunchFlags(command, { model, permissionMode } = {}) {
   const m = String(model ?? "").trim();
-  const p = String(permissionMode ?? "").trim();
+  const asked = String(permissionMode ?? "").trim();
+  const p = PERMISSION_MODES.find((x) => x.toLowerCase() === asked.toLowerCase()) ?? "";
   if (m !== "" && !MODEL_WORD.test(m)) {
     return { error: `"${m}" can't be a model: use one word of letters, numbers, ., - and _, such as sonnet or claude-sonnet-5-5.` };
   }
-  if (p !== "" && !PERMISSION_MODES.includes(p)) {
-    return { error: `"${p}" isn't a permission mode open can set. Choices: ${PERMISSION_MODES.join(", ")}.` };
+  if (asked !== "" && p === "") {
+    return { error: `"${asked}" isn't a permission mode open can set. Choices: ${PERMISSION_MODES.join(", ")}.` };
   }
   return { command: [command, m && `--model ${m}`, p && `--permission-mode ${p}`].filter(Boolean).join(" ") };
+}
+
+// `/crosstalk open <profile> [--model m] [--mode p] [message]`, as words. Flags come straight
+// after the profile, as `--model m` or `--model=m`. Returns the parts, or { error }.
+export function parseOpenArgs(words) {
+  const [profile = "", ...rest] = (words ?? []).map(String);
+  const parts = { profile: profile.toLowerCase(), model: "", permissionMode: "", message: "" };
+  let i = 0;
+  while (i < rest.length && rest[i].startsWith("--")) {
+    const [flag, joined] = rest[i].split(/=(.*)/s);
+    const value = joined ?? rest[i + 1];
+    const key = { "--model": "model", "--mode": "permissionMode", "--permission-mode": "permissionMode" }[flag.toLowerCase()];
+    if (!key) {
+      return { error: `Unknown option ${flag}. open takes --model <model> and --mode <permission mode>.` };
+    }
+    if (value === undefined || value === "") {
+      return { error: `${flag} needs a value, such as ${key === "model" ? "--model sonnet" : "--mode plan"}.` };
+    }
+    parts[key] = value;
+    i += joined === undefined ? 2 : 1;
+  }
+  parts.message = rest.slice(i).join(" ");
+  return parts;
 }
 
 // Claude Code's record that a folder is trusted: projects["C:/the/folder"].hasTrustDialogAccepted
@@ -223,6 +247,58 @@ export function vscodeLink(ask) {
 // person's own `claude` functions live.
 export function windowArgv(cwd, command) {
   return ["wt", "-w", "new", "-d", cwd, "pwsh", "-NoExit", "-Command", command];
+}
+
+// macOS and Linux. A folder can hold any character, so it goes in single quotes; the command is
+// already held to plain words by isSafeLaunch.
+export const shQuote = (text) => `'${String(text).replace(/'/g, "'\\''")}'`;
+
+// The person's shell, where their claude-<name> shortcuts live. Only a plain path is used.
+export function userShell(shell) {
+  const s = String(shell ?? "");
+  return /^\/[A-Za-z0-9_./-]+$/.test(s) ? s : "/bin/bash";
+}
+
+// macOS: a new Terminal.app window, whose shell already reads the person's startup files.
+export function macArgv(cwd, command) {
+  const script = `cd ${shQuote(cwd)} && ${command}`;
+  const quoted = script.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  return ["osascript", "-e", `tell application "Terminal" to do script "${quoted}"`, "-e", 'tell application "Terminal" to activate'];
+}
+
+// Linux terminals, in the order they're tried. tmux comes first when this session runs in it.
+export const LINUX_TERMINALS = ["tmux", "gnome-terminal", "konsole", "xfce4-terminal", "kitty", "alacritty", "wezterm", "xterm", "x-terminal-emulator"];
+
+// Which terminals to look for: one named in CLAUDE_CROSSTALK_TERMINAL first, then tmux if this is
+// inside it, then the desktop ones if there is a desktop to show them on.
+export function linuxCandidates({ wanted, inTmux, hasDisplay } = {}) {
+  const usable = LINUX_TERMINALS.filter((t) => (t === "tmux" ? inTmux : hasDisplay));
+  const first = String(wanted ?? "").trim().toLowerCase();
+  return LINUX_TERMINALS.includes(first) ? [first, ...usable.filter((t) => t !== first)] : usable;
+}
+
+// Prints the first of the candidates that is installed.
+export function whichArgv(candidates) {
+  return ["sh", "-c", 'for t in "$@"; do command -v "$t" >/dev/null 2>&1 && { echo "$t"; exit 0; }; done; exit 1', "sh", ...candidates];
+}
+
+// The command that opens `terminal` in the folder, running Claude Code in an interactive shell
+// (so shortcuts are defined) that stays open after it exits. Terminals that keep running until
+// closed are started in the background, so Crosstalk doesn't wait on them.
+export function linuxArgv(terminal, cwd, command, shell) {
+  const sh = userShell(shell);
+  const run = [sh, "-ic", `cd ${shQuote(cwd)} && ${command}; exec ${sh}`];
+  const background = (argv) => ["sh", "-c", 'nohup "$@" >/dev/null 2>&1 &', "sh", ...argv];
+  switch (terminal) {
+    case "tmux": return ["tmux", "new-window", "-c", cwd, ...run];
+    case "gnome-terminal": return ["gnome-terminal", "--", ...run];
+    case "konsole": return background(["konsole", "-e", ...run]);
+    case "xfce4-terminal": return background(["xfce4-terminal", "-x", ...run]);
+    case "kitty": return background(["kitty", ...run]);
+    case "alacritty": return background(["alacritty", "-e", ...run]);
+    case "wezterm": return background(["wezterm", "start", "--", ...run]);
+    default: return background([terminal, "-e", ...run]);
+  }
 }
 
 // The session that opened: the newest live one of that profile, in that folder, started since.

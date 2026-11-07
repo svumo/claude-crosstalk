@@ -4,6 +4,7 @@ import {
   addressOf, frameMessages, isLive, LIVE_MS, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, SHOW_TEXT, showMessages, toolResultCount, toolUseCount,
   chooseOpenIn, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
+  linuxArgv, linuxCandidates, macArgv, parseOpenArgs, shQuote, userShell, whichArgv,
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -430,6 +431,46 @@ test('open can set the model and permission mode, and nothing that breaks the la
   for (const opts of [{ model: 'glm-5.3', permissionMode: 'dontAsk' }, { model: 'opus', permissionMode: 'auto' }]) expect(isSafeLaunch(withLaunchFlags('claude-work', opts).command)).toBe(true)
 })
 
+test('a permission mode is matched whatever its case', async () => {
+  expect(withLaunchFlags('claude', { permissionMode: 'acceptedits' })).toEqual({ command: 'claude --permission-mode acceptEdits' })
+  expect(withLaunchFlags('claude', { permissionMode: 'PLAN' })).toEqual({ command: 'claude --permission-mode plan' })
+  expect(withLaunchFlags('claude', { permissionMode: 'BypassPermissions' }).error).toMatch(/isn't a permission mode/)
+})
+
+test('/crosstalk open reads --model and --mode after the profile, and the rest is the message', async () => {
+  expect(parseOpenArgs(['Mikey', '--model', 'sonnet', '--mode=plan', 'say', 'hi'])).toEqual({ profile: 'mikey', model: 'sonnet', permissionMode: 'plan', message: 'say hi' })
+  expect(parseOpenArgs(['zai', '--permission-mode', 'auto'])).toEqual({ profile: 'zai', model: '', permissionMode: 'auto', message: '' })
+  expect(parseOpenArgs(['zai', 'use', '--model', 'x'])).toEqual({ profile: 'zai', model: '', permissionMode: '', message: 'use --model x' })
+  expect(parseOpenArgs(['zai', '--fast']).error).toMatch(/Unknown option --fast/)
+  expect(parseOpenArgs(['zai', '--model']).error).toMatch(/needs a value/)
+  expect(parseOpenArgs(['zai', '--mode=']).error).toMatch(/needs a value/)
+  expect(parseOpenArgs([])).toEqual({ profile: '', model: '', permissionMode: '', message: '' })
+})
+
+test('on macOS a Terminal window opens in the folder, however the folder is named', async () => {
+  expect(shQuote("it's here")).toBe("'it'\\''s here'")
+  const argv = macArgv('/Users/me/a "b" \\c', 'claude-mikey --model sonnet')
+  expect(argv.slice(0, 2)).toEqual(['osascript', '-e'])
+  expect(argv[2]).toBe('tell application "Terminal" to do script "cd \'/Users/me/a \\"b\\" \\\\c\' && claude-mikey --model sonnet"')
+  expect(argv.slice(3)).toEqual(['-e', 'tell application "Terminal" to activate'])
+})
+
+test('on Linux the terminal is tmux when inside it, else the first desktop one, and a chosen one first', async () => {
+  expect(linuxCandidates({ inTmux: true, hasDisplay: false })).toEqual(['tmux'])
+  expect(linuxCandidates({ inTmux: false, hasDisplay: false })).toEqual([])
+  expect(linuxCandidates({ inTmux: false, hasDisplay: true })[0]).toBe('gnome-terminal')
+  expect(linuxCandidates({ wanted: 'Kitty', inTmux: true, hasDisplay: true }).slice(0, 2)).toEqual(['kitty', 'tmux'])
+  expect(linuxCandidates({ wanted: 'rm', inTmux: false, hasDisplay: true })).not.toContain('rm')
+  expect(whichArgv(['tmux', 'xterm']).slice(-2)).toEqual(['tmux', 'xterm'])
+  expect(userShell('/usr/bin/zsh')).toBe('/usr/bin/zsh')
+  for (const bad of [undefined, '', 'zsh', '/bin/sh; rm', '/bin/$(x)']) expect(userShell(bad)).toBe('/bin/bash')
+  const run = ['/bin/zsh', '-ic', "cd '/home/me/my proj' && claude-mikey; exec /bin/zsh"]
+  expect(linuxArgv('tmux', '/home/me/my proj', 'claude-mikey', '/bin/zsh')).toEqual(['tmux', 'new-window', '-c', '/home/me/my proj', ...run])
+  expect(linuxArgv('gnome-terminal', '/home/me/my proj', 'claude-mikey', '/bin/zsh')).toEqual(['gnome-terminal', '--', ...run])
+  expect(linuxArgv('kitty', '/home/me/my proj', 'claude-mikey', '/bin/zsh')).toEqual(['sh', '-c', 'nohup "$@" >/dev/null 2>&1 &', 'sh', 'kitty', ...run])
+  expect(linuxArgv('xterm', '/home/me/my proj', 'claude-mikey', '/bin/zsh').slice(4)).toEqual(['xterm', '-e', ...run])
+})
+
 test('a folder is marked trusted in a profile record, and nothing else changes', async () => {
   const added = JSON.parse(trustProject('', 'C:\\code\\proj')!)
   expect(added).toEqual({ projects: { 'C:/code/proj': { hasTrustDialogAccepted: true } } })
@@ -524,4 +565,60 @@ test('the open tool passes the model and permission mode on, and refuses bypassP
   expect(calls.find((a) => a[0] === 'wt')!.at(-1)).toBe('claude --model sonnet --permission-mode plan')
   expect(JSON.parse(files.get('C:/home/.claude/.claude.json')).projects['C:/code/proj'].hasTrustDialogAccepted).toBe(true)
   expect(files.get('C:/home/.claude.json')).toBe('{"projects":{"C:/code/proj":{"hasTrustDialogAccepted":true}}}') // already trusted: left as it was
+})
+
+test('/crosstalk open takes --model and --mode, and says what is wrong with a bad one', async ($, on) => {
+  const calls: any[] = []
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', CLAUDE_CROSSTALK_OPEN_IN: 'window' }, (e: any) => { calls.push(e.argv); return RAN_OK })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open zai --fast hi')).toMatch(/Unknown option --fast/)
+  expect(await say($, 'open zai --mode bypassPermissions hi')).toMatch(/isn't a permission mode/)
+  expect(calls.some((a) => a[0] === 'wt')).toBe(false)
+  expect(await say($, 'open zai --model opus --mode acceptedits review it')).toMatch(/Opening zai \(claude-zai --model opus --permission-mode acceptEdits\)/)
+  expect(calls.find((a) => a[0] === 'wt')!.at(-1)).toBe('claude-zai --model opus --permission-mode acceptEdits')
+})
+
+test('a trust mark written over by a running session is put back', async ($, on) => {
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', CLAUDE_CROSSTALK_OPEN_IN: 'window' })
+  const record = 'C:/home/.claude-zai/.claude.json'
+  const original = JSON.stringify({ numStartups: 5 })
+  let clobbers = 1
+  let always = false
+  on('clock.sleep', () => { if (always || clobbers-- > 0) files.set(record, original); return { value: undefined } })
+  seed(files, 'C:/home/.claude-zai', { '.claude.json': original })
+  await $.session.start(START)
+  expect(await say($, 'open zai')).not.toMatch(/trust/)
+  expect(JSON.parse(files.get(record))).toEqual({ numStartups: 5, projects: { 'C:/code/proj': { hasTrustDialogAccepted: true } } })
+  always = true
+  files.set(record, original)
+  expect(await say($, 'open zai')).toMatch(/may stop at the folder-trust screen/)
+})
+
+const UNIX_ENV = { HOME: '/home/me', CLAUDE_CONFIG_DIR: '/home/me/.claude-work', SHELL: '/bin/zsh', CLAUDE_CROSSTALK_OPEN_IN: 'window' }
+
+test('on macOS open starts a Terminal window', async ($, on) => {
+  const calls: any[] = []
+  fakeDisk(on, UNIX_ENV, (e: any) => { calls.push(e.argv); return e.argv[0] === 'uname' ? { ...RAN_OK, stdout: 'Darwin\n' } : RAN_OK })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open mikey --mode plan')).toMatch(/Opening mikey \(claude-mikey --permission-mode plan\) in a new Terminal window/)
+  expect(calls.find((a) => a[0] === 'osascript')).toEqual(macArgv('C:\\code\\proj', 'claude-mikey --permission-mode plan'))
+})
+
+test('on Linux open uses the terminal it finds, and says so when there is none', async ($, on) => {
+  const calls: any[] = []
+  let installed = 'konsole\n'
+  fakeDisk(on, { ...UNIX_ENV, DISPLAY: ':0' }, (e: any) => {
+    calls.push(e.argv)
+    if (e.argv[0] === 'uname') return { ...RAN_OK, stdout: 'Linux\n' }
+    if (e.argv[0] === 'sh' && e.argv[2].startsWith('for t')) return installed ? { ...RAN_OK, stdout: installed } : { ...RAN_OK, exitCode: 1 }
+    return RAN_OK
+  })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open mikey')).toMatch(/in a new konsole window/)
+  expect(calls.at(-1)).toEqual(linuxArgv('konsole', 'C:\\code\\proj', 'claude-mikey', '/bin/zsh'))
+  installed = ''
+  expect(await say($, 'open mikey')).toMatch(/Couldn't find a terminal to open/)
 })
