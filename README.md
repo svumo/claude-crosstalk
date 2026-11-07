@@ -97,6 +97,19 @@ Or build it from `vscode/` with `npx @vscode/vsce package`. The helper only runs
 
 If you start a profile some other way than `claude-<profile>`, tell Crosstalk once: `/crosstalk launch zai claude zai`.
 
+When the model opens a session with the `open` tool, it can also choose that session's model and permission mode:
+
+| `open` parameter | What it does |
+|---|---|
+| `profile` | The profile to start, as `/crosstalk` names them. Required |
+| `message` | A first message, sent once the session is up |
+| `model` | Adds `--model`, such as `sonnet` or `claude-sonnet-5-5`. One plain word only, so `opus[1m]` isn't accepted |
+| `permissionMode` | Adds `--permission-mode`: `default`, `manual`, `acceptEdits`, `plan`, `auto` or `dontAsk` |
+
+Left out, the session uses the profile's own launch command. `bypassPermissions` isn't offered (build choice), so a model can't start a session that runs unsupervised on its own. If you want a profile to always start that way, put it in its saved launch command: `/crosstalk launch mikey claude-mikey --permission-mode bypassPermissions`.
+
+**The folder is trusted for you.** A profile that hasn't opened this folder before would stop at "Is this a project you trust?", with nobody there to answer it. So before it starts, `open` marks the folder as trusted in that profile's `.claude.json`, the same record Claude Code writes when you answer yes. This is a build choice: the session doing the opening is already running in this folder, so you have trusted it on that profile, and Crosstalk only carries that trust over to a session you asked for in the same folder. Every other setting in the file is left as it was. If the file can't be updated, the session still opens, and Crosstalk tells you it may stop at the trust screen.
+
 By default the new session opens as a tab to the right of your terminal tabs at the top, and takes focus. Two VS Code settings change that. You don't need to reload after changing them:
 
 | Setting | Choices | Default |
