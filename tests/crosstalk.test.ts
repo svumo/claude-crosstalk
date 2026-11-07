@@ -87,8 +87,10 @@ test('tool calls and results are counted, so a message never lands between them'
   expect(toolUseCount('plain')).toBe(0)
 })
 
-// The mod itself, with a folder in memory standing for the disk. The host hands paths over in Windows spelling.
-const slash = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\/home\/me)/, '') // and may add a drive to a Unix path
+// The mod itself, with a folder in memory standing for the disk. On Windows the host hands paths
+// over in Windows spelling, and may add a drive to a Unix path. On macOS and Linux a Windows path
+// isn't absolute, so the host puts the working folder in front of it: that part is dropped.
+const slash = (path: string) => path.replace(/\\/g, '/').replace(/^.*?(?=(?<![A-Za-z])[A-Za-z]:\/)/, '').replace(/^[A-Za-z]:(?=\/home\/me)/, '')
 
 const RAN_OK = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
 
