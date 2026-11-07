@@ -93,7 +93,7 @@ Every message that arrives is also shown to you in the transcript, as `Crosstalk
 code --install-extension <the plugin's folder>/vscode/crosstalk-terminal-0.3.0.vsix
 ```
 
-Or build it from `vscode/` with `npx @vscode/vsce package`. The helper only runs commands that start Claude Code, so a link from anywhere else can't run anything else through it. Without the helper, or outside VS Code, `open` starts a new terminal window. On Windows that's Windows Terminal. On macOS it's Terminal. On Linux it's a new tmux window when you're inside tmux, otherwise the first desktop terminal it finds (`CLAUDE_CROSSTALK_TERMINAL` picks one). The new shell runs your startup files, so `claude-<profile>` shortcuts work there. macOS and Linux haven't been tried on real machines yet, so reports are welcome.
+Or build it from `vscode/` with `npx @vscode/vsce package`. The helper only runs commands that start Claude Code, so a link from anywhere else can't run anything else through it. Without the helper, or outside VS Code, `open` starts a new terminal window. On Windows that's Windows Terminal. On macOS it's Terminal. On Linux it's a new tmux window when you're inside tmux, otherwise the first desktop terminal it finds (`CLAUDE_CROSSTALK_TERMINAL` picks one). The new shell runs your startup files, so `claude-<profile>` shortcuts work there. The first time on macOS, it asks whether the app you run Claude Code in may control Terminal. Say yes; Crosstalk waits up to two minutes for the answer.
 
 If you start a profile some other way than `claude-<profile>`, tell Crosstalk once: `/crosstalk launch zai claude zai`.
 
@@ -265,7 +265,7 @@ Optional environment variables, set before you start a session:
 
 ## Tested on
 
-Windows 11 with Claude Code 2.1.318, using PowerShell 7 and Git Bash. macOS, Linux and zsh should work but haven't been run for real, so reports are welcome.
+Windows 11 with Claude Code 2.1.318, using PowerShell 7 and Git Bash. `open` on macOS (Terminal, macOS 26) and Linux (tmux, xterm) is checked for real by the `open check` workflow on GitHub's runners, and Ubuntu under WSL. A full session between two logged-in profiles has only been run on Windows, so reports from macOS and Linux are welcome.
 
 ## Accounts and terms
 

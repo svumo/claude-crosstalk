@@ -3,7 +3,9 @@
 ## 1.4.0
 
 - `/crosstalk open <profile> --model <m> --mode <p> [message]`: the slash command can set the new session's model and permission mode too. Modes are matched whatever their case.
-- `open` works on macOS and Linux. On macOS it opens a Terminal window. On Linux it opens a new tmux window when you're in tmux, otherwise the first desktop terminal it finds; `CLAUDE_CROSSTALK_TERMINAL` picks one. Not yet tried on real machines.
+- `open` works on macOS and Linux. On macOS it opens a Terminal window. On Linux it opens a new tmux window when you're in tmux, otherwise the first desktop terminal it finds; `CLAUDE_CROSSTALK_TERMINAL` picks one. On macOS, Crosstalk waits up to two minutes for the first-time "control Terminal?" prompt, and says where to allow it if it's refused.
+- The `open check` workflow runs the tests and a real `open` on GitHub's macOS and Linux runners, on pull requests and on request. `scripts/open-check.mjs` does the real check, with a throwaway shortcut and no login. The tests now pass on macOS and Linux as well as Windows.
+- A `/vm` skill in the repo starts Linux (WSL) or a macOS runner to test on.
 - The folder-trust mark is read back after it's written and put back if a session already running on that profile wrote over it.
 - `scripts/install-local.mjs` installs the committed code on every profile on this computer, from whichever marketplace each one uses.
 

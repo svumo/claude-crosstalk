@@ -62,6 +62,8 @@ gh run view "$id" --log-failed                    # if it failed
 ## Limits
 
 - The Mac is a CI runner, not a desktop to look at. Results come back through the log.
-- If the Terminal check fails with "Not authorized to send Apple events" (-1743), macOS blocked the
-  automation permission on the runner. Say so: everything up to that step is still checked.
+- Nobody is there to answer macOS's "control Terminal?" prompt on a runner, so the workflow grants it
+  ahead of time in the runner's own TCC database (runners have SIP off). If the Terminal check ever
+  times out or fails with -1743, look at the "Let this runner control Terminal" step first: a new
+  runner image may have moved the app that macOS asks on behalf of.
 - A macOS VM on this PC isn't used. The CPU is AMD, and Intel macOS ends with macOS 26.
