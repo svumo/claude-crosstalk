@@ -79,7 +79,7 @@ Just ask, in plain words:
 | `/crosstalk setup` | Shows your profiles and what setup would do. Changes nothing |
 | `/crosstalk setup yes` | Does it |
 | `/crosstalk add <name>` | Makes a new profile, ready to log in to |
-| `/crosstalk open <profile> [message]` | Starts a session on that profile in a new terminal, in this folder, and sends it your message once it's up |
+| `/crosstalk open <profile> [--model m] [--mode p] [message]` | Starts a session on that profile in a new terminal, in this folder, and sends it your message once it's up. `--model` and `--mode` set its model and permission mode |
 | `/crosstalk open-in auto\|vscode\|window` | Where `open` starts it. `auto` is a VS Code terminal when you're in VS Code, else a new window |
 | `/crosstalk launch <profile> <command>` | The command that starts a profile, such as `claude zai`. Default: `claude-<profile>` |
 
@@ -93,22 +93,22 @@ Every message that arrives is also shown to you in the transcript, as `Crosstalk
 code --install-extension <the plugin's folder>/vscode/crosstalk-terminal-0.3.0.vsix
 ```
 
-Or build it from `vscode/` with `npx @vscode/vsce package`. The helper only runs commands that start Claude Code, so a link from anywhere else can't run anything else through it. Without the helper, or outside VS Code, `open` starts a new Windows Terminal window. Other systems are not supported yet.
+Or build it from `vscode/` with `npx @vscode/vsce package`. The helper only runs commands that start Claude Code, so a link from anywhere else can't run anything else through it. Without the helper, or outside VS Code, `open` starts a new terminal window. On Windows that's Windows Terminal. On macOS it's Terminal. On Linux it's a new tmux window when you're inside tmux, otherwise the first desktop terminal it finds (`CLAUDE_CROSSTALK_TERMINAL` picks one). The new shell runs your startup files, so `claude-<profile>` shortcuts work there. macOS and Linux haven't been tried on real machines yet, so reports are welcome.
 
 If you start a profile some other way than `claude-<profile>`, tell Crosstalk once: `/crosstalk launch zai claude zai`.
 
-When the model opens a session with the `open` tool, it can also choose that session's model and permission mode:
+You can set the new session's model and permission mode, as in `/crosstalk open mikey --model sonnet --mode plan review this`. The model can do the same with the `open` tool:
 
 | `open` parameter | What it does |
 |---|---|
 | `profile` | The profile to start, as `/crosstalk` names them. Required |
 | `message` | A first message, sent once the session is up |
 | `model` | Adds `--model`, such as `sonnet` or `claude-sonnet-5-5`. One plain word only, so `opus[1m]` isn't accepted |
-| `permissionMode` | Adds `--permission-mode`: `default`, `manual`, `acceptEdits`, `plan`, `auto` or `dontAsk` |
+| `permissionMode` | Adds `--permission-mode`: `default`, `manual`, `acceptEdits`, `plan`, `auto` or `dontAsk`, in any case |
 
 Left out, the session uses the profile's own launch command. `bypassPermissions` isn't offered (build choice), so a model can't start a session that runs unsupervised on its own. If you want a profile to always start that way, put it in its saved launch command: `/crosstalk launch mikey claude-mikey --permission-mode bypassPermissions`.
 
-**The folder is trusted for you.** A profile that hasn't opened this folder before would stop at "Is this a project you trust?", with nobody there to answer it. So before it starts, `open` marks the folder as trusted in that profile's `.claude.json`, the same record Claude Code writes when you answer yes. This is a build choice: the session doing the opening is already running in this folder, so you have trusted it on that profile, and Crosstalk only carries that trust over to a session you asked for in the same folder. Every other setting in the file is left as it was. If the file can't be updated, the session still opens, and Crosstalk tells you it may stop at the trust screen.
+**The folder is trusted for you.** A profile that hasn't opened this folder before would stop at "Is this a project you trust?", with nobody there to answer it. So before it starts, `open` marks the folder as trusted in that profile's `.claude.json`, the same record Claude Code writes when you answer yes. This is a build choice: the session doing the opening is already running in this folder, so you have trusted it on that profile, and Crosstalk only carries that trust over to a session you asked for in the same folder. Every other setting in the file is left as it was. A session already running on that profile can write over the change with its own copy, so Crosstalk reads the file back and marks it again if it has to. If the file can't be updated, the session still opens, and Crosstalk tells you it may stop at the trust screen.
 
 By default the new session opens as a tab to the right of your terminal tabs at the top, and takes focus. Two VS Code settings change that. You don't need to reload after changing them:
 
@@ -245,6 +245,8 @@ Each session records that it's running and checks its own inbox. When a message 
 | A provider can't send messages | Its model may not support tool calls. |
 | `open` makes a window, not a VS Code tab | The helper isn't installed (see Opening a session in VS Code), or `open-in` is set to `window`. |
 | `open` says no session showed up | Look in the new terminal. The launch command may be wrong: check it with `/crosstalk launch <profile>`. |
+| On Linux, `open` says it couldn't find a terminal | It looks for tmux (only from inside tmux), gnome-terminal, konsole, xfce4-terminal, kitty, alacritty, wezterm, xterm and x-terminal-emulator. The desktop ones need `DISPLAY` or `WAYLAND_DISPLAY` set. Set `CLAUDE_CROSSTALK_TERMINAL` to pick one. |
+| On macOS, `open` asks to control Terminal | That's macOS checking that Crosstalk may open a Terminal window. Allow it once. |
 | With several VS Code windows, the tab opened in another one | The link goes to the window you used last. Click into the one you want, then try again. |
 
 ## Settings
@@ -257,6 +259,7 @@ Optional environment variables, set before you start a session:
 | `CLAUDE_CROSSTALK_DIR` | The shared folder. Set the same on every profile | `~/.claude-crosstalk` |
 | `CLAUDE_CROSSTALK_WAKE_LIMIT` | Wake-ups in a row before messages wait for you | 25 |
 | `CLAUDE_CROSSTALK_OPEN_IN` | Where `/crosstalk open` starts a session (`auto`, `vscode`, `window`), over the saved setting | `auto` |
+| `CLAUDE_CROSSTALK_TERMINAL` | On Linux, the terminal `open` tries first, such as `kitty` or `tmux` | The first one found |
 
 `/crosstalk open-in` and `/crosstalk launch` save their settings in `setup.json` in the shared folder, so every profile uses them.
 
@@ -277,6 +280,15 @@ claude plugin validate .
 claude plugin test .
 claude --plugin-dir .
 ```
+
+To run what you've committed on every profile on this computer:
+
+```bash
+node scripts/install-local.mjs --dry-run   # what it would do
+node scripts/install-local.mjs
+```
+
+It finds each profile that has Crosstalk and updates it from the marketplace it was installed from. For a folder marketplace, such as one in `~/.claude/mod-sources`, it first copies the committed files there. For a GitHub one, it updates from GitHub, so push first. Uncommitted changes are left out. Claude Code only loads new code when the version in `.claude-plugin/plugin.json` changes, so bump it, then restart your sessions.
 
 To try `/crosstalk setup` without touching your real shell files or profiles, set `CLAUDE_CROSSTALK_HOME` to an empty folder, which stands in for your home folder. `CLAUDE_CROSSTALK_MARKETPLACE` changes where it installs from.
 
