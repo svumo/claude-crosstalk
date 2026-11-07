@@ -649,7 +649,10 @@ async function openSession($, profile, message, opts = {}) {
       return { error: opener.error };
     }
     place = opener.place ?? place;
-    ran = await $.process.run(opener.argv, { timeoutMs: 30_000 }).catch(() => null);
+    ran = await $.process.run(opener.argv, { timeoutMs: opener.timeoutMs ?? 30_000 }).catch(() => null);
+    if (opener.isMac && ran && ran.exitCode !== 0 && /-1743|not authori[sz]ed/i.test(ran.stderr ?? "")) {
+      return { error: "macOS didn't let Crosstalk control Terminal. Allow it in System Settings > Privacy & Security > Automation, under the app this session runs in, then try again." };
+    }
   }
   if (!ran || ran.exitCode !== 0) {
     return { error: `Couldn't open ${place}${ran?.stderr ? `: ${ran.stderr.trim().slice(0, 200)}` : "."}` };
@@ -664,7 +667,9 @@ async function openSession($, profile, message, opts = {}) {
 async function unixWindow($, command) {
   const system = await $.process.run(["uname", "-s"], { timeoutMs: 10_000 }).catch(() => null);
   if (String(system?.stdout ?? "").trim() === "Darwin") {
-    return { argv: macArgv(me.cwd, command), place: "a new Terminal window" };
+    // The first time, macOS asks the person whether this may control Terminal, and osascript
+    // waits for the answer, so it gets two minutes.
+    return { argv: macArgv(me.cwd, command), place: "a new Terminal window", isMac: true, timeoutMs: 120_000 };
   }
   const candidates = linuxCandidates({
     wanted: await $.env.get("CLAUDE_CROSSTALK_TERMINAL"),

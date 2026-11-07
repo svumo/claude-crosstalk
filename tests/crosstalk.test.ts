@@ -601,11 +601,21 @@ const UNIX_ENV = { HOME: '/home/me', CLAUDE_CONFIG_DIR: '/home/me/.claude-work',
 
 test('on macOS open starts a Terminal window', async ($, on) => {
   const calls: any[] = []
-  fakeDisk(on, UNIX_ENV, (e: any) => { calls.push(e.argv); return e.argv[0] === 'uname' ? { ...RAN_OK, stdout: 'Darwin\n' } : RAN_OK })
+  let refused = false
+  fakeDisk(on, UNIX_ENV, (e: any) => {
+    calls.push(e)
+    if (e.argv[0] === 'uname') return { ...RAN_OK, stdout: 'Darwin\n' }
+    if (e.argv[0] === 'osascript' && refused) return { ...RAN_OK, exitCode: 1, stderr: 'execution error: Not authorized to send Apple events to Terminal. (-1743)' }
+    return RAN_OK
+  })
   on('clock.sleep', () => ({ value: undefined }))
   await $.session.start(START)
   expect(await say($, 'open mikey --mode plan')).toMatch(/Opening mikey \(claude-mikey --permission-mode plan\) in a new Terminal window/)
-  expect(calls.find((a) => a[0] === 'osascript')).toEqual(macArgv('C:\\code\\proj', 'claude-mikey --permission-mode plan'))
+  const osascript = calls.find((c) => c.argv[0] === 'osascript')
+  expect(osascript.argv).toEqual(macArgv('C:\\code\\proj', 'claude-mikey --permission-mode plan'))
+  expect(osascript.init?.timeoutMs ?? osascript.timeoutMs).toBe(120_000) // time to answer macOS's first-time prompt
+  refused = true
+  expect(await say($, 'open mikey')).toMatch(/Privacy & Security > Automation/)
 })
 
 test('on Linux open uses the terminal it finds, and says so when there is none', async ($, on) => {
