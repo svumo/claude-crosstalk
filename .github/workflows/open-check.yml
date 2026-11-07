@@ -62,6 +62,21 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a node scripts/open-check.mjs --terminal xterm
 
+      - name: Diagnose Terminal automation (temporary)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: |
+          sw_vers; csrutil status || true
+          TCC="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
+          ls -la "$TCC" /Library/Application\ Support/com.apple.TCC/TCC.db 2>&1 || true
+          sqlite3 "$TCC" "select service, client, indirect_object_identifier, auth_value from access" 2>&1 | head -30 || true
+          sqlite3 "$TCC" ".schema access" 2>&1 | head -5 || true
+          echo "--- osascript, 90s"
+          start=$(date +%s); timeout 90 osascript -e 'tell application "Terminal" to get name'; echo "exit=$? after $(( $(date +%s) - start ))s"
+          echo "--- System Events, 30s"
+          timeout 30 osascript -e 'tell application "System Events" to get name'; echo "exit=$?"
+          pgrep -lf Terminal || true
+
       - name: open, for real, in Terminal
         if: runner.os == 'macOS'
         run: node scripts/open-check.mjs
