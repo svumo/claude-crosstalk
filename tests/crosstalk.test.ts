@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import {
   addressOf, frameMessages, isLive, LIVE_MS, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, SHOW_TEXT, showMessages, toolResultCount, toolUseCount,
-  chooseOpenIn, findOpened, isSafeLaunch, launchFor, vscodeLink, windowArgv,
+  chooseOpenIn, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -420,6 +420,27 @@ test('only Claude Code is started', async () => {
   for (const bad of ['rm -rf x', 'claude; calc', 'claude && x', 'claude $(x)', 'claude `x`', 'claude | x', 'claudex', ' claude', 'claude\nx']) expect(isSafeLaunch(bad)).toBe(false)
 })
 
+test('open can set the model and permission mode, and nothing that breaks the launch rule', async () => {
+  expect(withLaunchFlags('claude zai', {})).toEqual({ command: 'claude zai' })
+  expect(withLaunchFlags('claude-mikey', { model: 'sonnet', permissionMode: 'plan' })).toEqual({ command: 'claude-mikey --model sonnet --permission-mode plan' })
+  expect(withLaunchFlags('claude', { model: ' claude-sonnet-5-5 ' })).toEqual({ command: 'claude --model claude-sonnet-5-5' })
+  expect(withLaunchFlags('claude', { permissionMode: 'acceptEdits' })).toEqual({ command: 'claude --permission-mode acceptEdits' })
+  for (const model of ['opus[1m]', 'x;y', 'a b', '$(x)']) expect(withLaunchFlags('claude', { model }).error).toMatch(/can't be a model/)
+  for (const permissionMode of ['bypassPermissions', 'plan; calc', 'yolo']) expect(withLaunchFlags('claude', { permissionMode }).error).toMatch(/isn't a permission mode/)
+  for (const opts of [{ model: 'glm-5.3', permissionMode: 'dontAsk' }, { model: 'opus', permissionMode: 'auto' }]) expect(isSafeLaunch(withLaunchFlags('claude-work', opts).command)).toBe(true)
+})
+
+test('a folder is marked trusted in a profile record, and nothing else changes', async () => {
+  const added = JSON.parse(trustProject('', 'C:\\code\\proj')!)
+  expect(added).toEqual({ projects: { 'C:/code/proj': { hasTrustDialogAccepted: true } } })
+  const before = { numStartups: 3, projects: { 'C:/other': { allowedTools: ['x'] }, 'C:/code/proj': { history: [1], hasTrustDialogAccepted: false } } }
+  const after = JSON.parse(trustProject(JSON.stringify(before), 'C:\\code\\proj\\')!)
+  expect(after).toEqual({ numStartups: 3, projects: { 'C:/other': { allowedTools: ['x'] }, 'C:/code/proj': { history: [1], hasTrustDialogAccepted: true } } })
+  expect(trustProject(JSON.stringify(after), 'C:/code/proj')).toBe(null)
+  expect(JSON.parse(trustProject('{}', 'C:\\')!).projects).toEqual({ 'C:/': { hasTrustDialogAccepted: true } })
+  for (const bad of ['{"projects":', '[1]', 'null', '{"projects":[]}']) expect(trustProject(bad, 'C:\\code\\proj')).toBe(null)
+})
+
 test('where a session opens: the variable, then the setting, then VS Code if this runs there', async () => {
   expect(chooseOpenIn(undefined, undefined, 'vscode', true)).toEqual({ where: 'vscode' })
   expect(chooseOpenIn(undefined, undefined, 'vscode', false).where).toBe('window')
@@ -455,11 +476,14 @@ test('open runs the VS Code link, then hands the new session its first message',
     return RAN_OK
   })
   on('clock.sleep', () => ({ value: undefined }))
+  seed(files, 'C:/home/.claude-zai', { '.claude.json': JSON.stringify({ numStartups: 2, projects: { 'C:/elsewhere': { hasTrustDialogAccepted: true } } }) })
   await $.session.start(START)
   expect(await say($, 'launch zai claude zai')).toMatch(/zai starts with: claude zai/)
   expect(await say($, 'launch zai rm -rf x')).toMatch(/only starts Claude Code/)
   const text = await say($, 'open zai say hello')
   expect(text).toMatch(/Opening zai \(claude zai\) in a new VS Code terminal/)
+  expect(text).not.toMatch(/trust/)
+  expect(JSON.parse(files.get('C:/home/.claude-zai/.claude.json'))).toEqual({ numStartups: 2, projects: { 'C:/elsewhere': { hasTrustDialogAccepted: true }, 'C:/code/proj': { hasTrustDialogAccepted: true } } })
   const open = calls.find((a) => a.includes('--open-url'))!
   const d = open[open.length - 1].split('d=')[1]
   expect(unlink(d)).toEqual({ name: 'claude zai', cwd: 'C:\\code\\proj', cmd: 'claude zai' })
@@ -477,7 +501,27 @@ test('open-in window opens a terminal window, and the setting is kept', async ($
   expect(await say($, 'open-in sideways')).toMatch(/Usage/)
   expect(await say($, 'open-in window')).toMatch(/open in: window/)
   expect(await say($, 'open-in')).toMatch(/open in: window/)
-  expect(await say($, 'open zai')).toMatch(/new terminal window/)
+  const opened = await say($, 'open zai')
+  expect(opened).toMatch(/new terminal window/)
+  expect(opened).toMatch(/may stop at the folder-trust screen/) // no zai profile to mark
   expect(calls.some((a) => a.includes('--list-extensions'))).toBe(false)
   expect(calls.find((a) => a[0] === 'wt')).toEqual(['wt', '-w', 'new', '-d', 'C:\\code\\proj', 'pwsh', '-NoExit', '-Command', 'claude-zai'])
+})
+
+test('the open tool passes the model and permission mode on, and refuses bypassPermissions', async ($, on) => {
+  const calls: any[] = []
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', CLAUDE_CROSSTALK_OPEN_IN: 'window' }, (e: any) => { calls.push(e.argv); return RAN_OK })
+  on('clock.sleep', () => ({ value: undefined }))
+  seed(files, 'C:/home/.claude', { '.claude.json': '{}' })
+  files.set('C:/home/.claude.json', '{"projects":{"C:/code/proj":{"hasTrustDialogAccepted":true}}}')
+  await $.session.start(START)
+  const refused: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'default', permissionMode: 'bypassPermissions' } as never)
+  expect(JSON.stringify(refused)).toMatch(/isn't a permission mode/)
+  expect(calls.some((a) => a[0] === 'wt')).toBe(false)
+  const ok: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'default', model: 'sonnet', permissionMode: 'plan' } as never)
+  expect(JSON.stringify(ok)).toMatch(/Opening default \(claude --model sonnet --permission-mode plan\)/)
+  expect(JSON.stringify(ok)).not.toMatch(/trust/)
+  expect(calls.find((a) => a[0] === 'wt')!.at(-1)).toBe('claude --model sonnet --permission-mode plan')
+  expect(JSON.parse(files.get('C:/home/.claude/.claude.json')).projects['C:/code/proj'].hasTrustDialogAccepted).toBe(true)
+  expect(files.get('C:/home/.claude.json')).toBe('{"projects":{"C:/code/proj":{"hasTrustDialogAccepted":true}}}') // already trusted: left as it was
 })

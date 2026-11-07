@@ -16,7 +16,8 @@
 import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
-  chooseOpenIn, findOpened, HELPER_ID, isSafeLaunch, launchFor, OPEN_IN, vscodeLink, windowArgv,
+  chooseOpenIn, findOpened, HELPER_ID, isSafeLaunch, launchFor, OPEN_IN, PERMISSION_MODES, trustProject,
+  vscodeLink, windowArgv, withLaunchFlags,
 } from "./core.mjs";
 import {
   configDirsInShell, homeCandidates, isInstalled, isSafeFolder, isSafeName, isUnreadable, looksLikeProfile,
@@ -159,7 +160,7 @@ export function register(on) {
     if (!me) {
       return notReady();
     }
-    const opened = await openSession($, String(e.profile ?? "").trim().toLowerCase(), String(e.message ?? ""));
+    const opened = await openSession($, String(e.profile ?? "").trim().toLowerCase(), String(e.message ?? ""), { model: e.model, permissionMode: e.permissionMode });
     return opened.error ? failed(opened.error) : { result: opened.text };
   });
 
@@ -551,18 +552,68 @@ async function launchCommand($, profile, command) {
   return `${profile} starts with: ${command.trim()}`;
 }
 
+// Mark this folder trusted in the profile about to start here, so it doesn't wait at "Is this a
+// project you trust?" with nobody there to answer. This session already runs in the folder, so
+// the person trusted it; the trust is only carried over to the session they asked to open.
+// Returns true when the profile's record says trusted afterwards.
+async function trustFolder($, pc, setup, profile) {
+  const found = (await survey($, pc, setup)).profiles.find((p) => p.name === profile);
+  if (!found) {
+    return false;
+  }
+  // Under CLAUDE_CONFIG_DIR the record is in that folder; plain ~/.claude keeps it at ~/.claude.json.
+  const paths = [`${found.folder}/.claude.json`];
+  if (sameFolder(found.folder, `${pc.home}/.claude`)) {
+    paths.push(`${pc.home}/.claude.json`);
+  }
+  let isTrusted = false;
+  for (const path of paths) {
+    const text = await readText($, path);
+    if (text === null) {
+      continue;
+    }
+    const next = trustProject(text, me.cwd);
+    if (next === null) {
+      isTrusted = isTrusted || parsesAsObject(text); // already trusted, or not safe to touch
+      continue;
+    }
+    try {
+      await $.fs.write(path, next);
+      isTrusted = true;
+    } catch {
+      // leave it; the launch still goes ahead
+    }
+  }
+  return isTrusted;
+}
+
+function parsesAsObject(text) {
+  try {
+    const data = JSON.parse(text);
+    return Boolean(data) && typeof data === "object" && !Array.isArray(data);
+  } catch {
+    return false;
+  }
+}
+
 // Start a session on `profile` in a new terminal, here in this folder, then say so when it is up
-// and hand it `message`. Returns { text } at once, or { error }.
-async function openSession($, profile, message) {
+// and hand it `message`. `opts` may set its model and permission mode. Returns { text } at once,
+// or { error }.
+async function openSession($, profile, message, opts = {}) {
   if (!PROFILE_WORD.test(profile)) {
     return { error: "Usage: /crosstalk open <profile> [first message], such as /crosstalk open zai say hello." };
   }
   const setup = await readJson($, `${root}/setup.json`, {});
-  const command = launchFor(profile, setup);
+  const flagged = withLaunchFlags(launchFor(profile, setup), opts);
+  if (flagged.error) {
+    return { error: flagged.error };
+  }
+  const command = flagged.command;
   if (!isSafeLaunch(command)) {
     return { error: `${profile} would start with "${command}", and Crosstalk only starts Claude Code. Set it with /crosstalk launch ${profile} <command>.` };
   }
   const pc = await computer($);
+  const isTrusted = await trustFolder($, pc, setup, profile).catch(() => false);
   const fromEnv = await $.env.get("CLAUDE_CROSSTALK_OPEN_IN");
   const termProgram = await $.env.get("TERM_PROGRAM");
   const wanted = String(fromEnv || setup.openIn || "auto").toLowerCase();
@@ -582,7 +633,8 @@ async function openSession($, profile, message) {
   }
   void watchOpened($, profile, since - 2_000, message);
   const place = choice.where === "vscode" ? "a new VS Code terminal" : "a new terminal window";
-  return { text: `Opening ${profile} (${command}) in ${place}${choice.why ? `, as ${choice.why}` : ""}. Crosstalk says here when it is up${message.trim() ? ", then sends it your message" : ""}.` };
+  const trust = isTrusted ? "" : ` Crosstalk couldn't mark this folder trusted for ${profile}, so it may stop at the folder-trust screen until someone answers it.`;
+  return { text: `Opening ${profile} (${command}) in ${place}${choice.why ? `, as ${choice.why}` : ""}. Crosstalk says here when it is up${message.trim() ? ", then sends it your message" : ""}.${trust}` };
 }
 
 async function watchOpened($, profile, since, message) {
@@ -640,8 +692,17 @@ async function startUp($) {
   });
   await $.tool.register({
     name: "open",
-    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in VS Code when this session runs there, else in a new terminal window.",
-    inputSchema: { type: "object", properties: { profile: { type: "string", description: "The profile to start, as /crosstalk names them" }, message: { type: "string", description: "A first message to send it once it is running" } }, required: ["profile"] },
+    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in VS Code when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        profile: { type: "string", description: "The profile to start, as /crosstalk names them" },
+        message: { type: "string", description: "A first message to send it once it is running" },
+        model: { type: "string", description: "Model for the new session, one word such as sonnet, opus or claude-sonnet-5-5" },
+        permissionMode: { type: "string", enum: PERMISSION_MODES, description: "Permission mode for the new session" },
+      },
+      required: ["profile"],
+    },
     isDeferred: false,
   });
   await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. open <profile> [message] starts one; open-in and launch set how; setup connects profiles; add <name> makes one; off and on pause it." });
