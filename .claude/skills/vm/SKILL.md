@@ -13,18 +13,21 @@ checks `open` with a throwaway `claude-xtcheck` shortcut and prints PASS or FAIL
 | `linux` | WSL Ubuntu on this PC, with tmux and xterm (xterm windows show on the desktop through WSLg) | seconds |
 | `mac` | A clean `macos-latest` GitHub Actions runner (Apple Silicon), free on this public repo | 2 to 4 minutes per run |
 
-Run WSL commands with the PowerShell tool: Git Bash mangles `$` and loops passed through `wsl.exe`.
-For anything longer than one line, write a script to the scratchpad and run it with `bash -l /mnt/c/...`.
+Run WSL commands with the PowerShell tool, from the repo's root: Git Bash mangles `$` and loops
+passed through `wsl.exe`. `--cd "$PWD"` hands WSL the repo folder. It needs PowerShell's
+backslash spelling, because `C:/...` is misread. For anything longer than one line, write a
+script to the scratchpad and run it with `bash -l /mnt/c/...`. The distro is assumed to be called
+`Ubuntu`; `wsl -l -v` lists them.
 
 ## linux
 
 ```powershell
 # Test open (tmux, then a real xterm window)
-wsl -d Ubuntu --cd /mnt/c/Users/skdes/Documents/github/claude-crosstalk -- bash -lc "node scripts/open-check.mjs --terminal tmux"
-wsl -d Ubuntu --cd /mnt/c/Users/skdes/Documents/github/claude-crosstalk -- bash -lc "node scripts/open-check.mjs --terminal xterm"
+wsl -d Ubuntu --cd "$PWD" -- bash -lc "node scripts/open-check.mjs --terminal tmux"
+wsl -d Ubuntu --cd "$PWD" -- bash -lc "node scripts/open-check.mjs --terminal xterm"
 
 # Plugin tests, on Linux
-wsl -d Ubuntu --cd /mnt/c/Users/skdes/Documents/github/claude-crosstalk -- bash -lc "claude plugin test ."
+wsl -d Ubuntu --cd "$PWD" -- bash -lc "claude plugin test ."
 
 # Any command
 wsl -d Ubuntu -- bash -lc "<command>"
@@ -55,7 +58,7 @@ gh run view "$id" --log-failed                    # if it failed
 
 - To run something on the Mac: `-f run='sw_vers; xcodebuild -version'`. Read the result in the "Your command" step of the log.
 - **For SSH:** `-f tmate=true`. The address is posted as a notice once the session is up. Read it while the run is still going:
-  `gh api repos/svumo/claude-crosstalk/check-runs/<job id>/annotations -q '.[].message'`, where `<job id>` comes from `gh run view "$id" --json jobs -q '.jobs[0].databaseId'`.
+  `gh api "repos/{owner}/{repo}/check-runs/<job id>/annotations" -q '.[].message'`, where `<job id>` comes from `gh run view "$id" --json jobs -q '.jobs[0].databaseId'`.
   Only the person who started the run can connect, with their GitHub SSH keys. The person connects with `ssh <address>`; tmate attaches to a terminal session, so it's for them, not for one-off commands from here. Use `run` for those. The session ends when they `touch /continue` or exit, if nobody connects within 10 minutes, or when the job times out after 90 minutes.
 - A pull request that touches `hooks/`, `tests/` or this workflow runs it on both macOS and Linux by itself.
 
