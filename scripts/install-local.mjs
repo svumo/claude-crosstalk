@@ -45,12 +45,10 @@ function git(args, asText = true) {
 // `claude` is a .cmd on some Windows installs, which only a shell starts. The arguments here are
 // plain words, so passing them through the shell is safe.
 function claude(configDir, args) {
-  const r = spawnSync("claude", args, {
-    env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
-    encoding: "utf8",
-    shell: isWindows,
-    timeout: 180_000,
-  });
+  const options = { env: { ...process.env, CLAUDE_CONFIG_DIR: configDir }, encoding: "utf8", timeout: 180_000 };
+  const r = isWindows
+    ? spawnSync(["claude", ...args].join(" "), { ...options, shell: true })
+    : spawnSync("claude", args, options);
   return { ok: r.status === 0, out: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
 }
 
