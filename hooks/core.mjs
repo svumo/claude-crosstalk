@@ -142,6 +142,54 @@ export function isSafeLaunch(command) {
   return SAFE_LAUNCH.test(String(command ?? ""));
 }
 
+// What `open` may ask the new session for. bypassPermissions is left out (build choice), so one
+// model can't start an unwatched session on its own; a saved launch command can still say it.
+// Claude Code renamed `default` to `manual`; both are taken, for older and newer versions.
+export const PERMISSION_MODES = ["default", "manual", "acceptEdits", "plan", "auto", "dontAsk"];
+const MODEL_WORD = /^[A-Za-z0-9_.-]+$/;
+
+// The launch command with --model and --permission-mode added. A model is one plain word, the
+// rule the launch check and the VS Code helper hold. Returns { command } or { error }.
+export function withLaunchFlags(command, { model, permissionMode } = {}) {
+  const m = String(model ?? "").trim();
+  const p = String(permissionMode ?? "").trim();
+  if (m !== "" && !MODEL_WORD.test(m)) {
+    return { error: `"${m}" can't be a model: use one word of letters, numbers, ., - and _, such as sonnet or claude-sonnet-5-5.` };
+  }
+  if (p !== "" && !PERMISSION_MODES.includes(p)) {
+    return { error: `"${p}" isn't a permission mode open can set. Choices: ${PERMISSION_MODES.join(", ")}.` };
+  }
+  return { command: [command, m && `--model ${m}`, p && `--permission-mode ${p}`].filter(Boolean).join(" ") };
+}
+
+// Claude Code's record that a folder is trusted: projects["C:/the/folder"].hasTrustDialogAccepted
+// in the profile's .claude.json. Returns the file's new text, or null when it is already trusted
+// or the file isn't JSON that can be safely changed. Every other key is kept.
+export function trustProject(jsonText, cwd) {
+  const key = String(cwd ?? "").replace(/\\/g, "/").replace(/(?<=.)\/+$/, "").replace(/^([A-Za-z]:)$/, "$1/");
+  if (key === "") {
+    return null;
+  }
+  let data;
+  try {
+    data = String(jsonText ?? "").trim() === "" ? {} : JSON.parse(jsonText);
+  } catch {
+    return null;
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    return null;
+  }
+  const projects = data.projects ?? {};
+  if (typeof projects !== "object" || Array.isArray(projects)) {
+    return null;
+  }
+  const entry = projects[key] ?? {};
+  if (typeof entry !== "object" || Array.isArray(entry) || entry.hasTrustDialogAccepted === true) {
+    return null;
+  }
+  return JSON.stringify({ ...data, projects: { ...projects, [key]: { ...entry, hasTrustDialogAccepted: true } } }, null, 2);
+}
+
 export const OPEN_IN = ["auto", "vscode", "window"];
 
 // Where a new session opens. A variable wins, then the saved setting; `auto` means VS Code when
