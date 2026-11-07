@@ -62,20 +62,29 @@ jobs:
         if: runner.os == 'Linux'
         run: xvfb-run -a node scripts/open-check.mjs --terminal xterm
 
-      - name: Diagnose Terminal automation (temporary)
+      # The first time something controls Terminal, macOS asks the person, and nobody is there to
+      # answer on a runner. Runners have SIP off and the runner user owns its own TCC database, so
+      # the answer is written there ahead of time: allowed, for this shell and everything above it
+      # (macOS asks on behalf of the app responsible for the process), and for osascript and node.
+      - name: Let this runner control Terminal
         if: runner.os == 'macOS'
-        continue-on-error: true
         run: |
-          sw_vers; csrutil status || true
           TCC="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
-          ls -la "$TCC" /Library/Application\ Support/com.apple.TCC/TCC.db 2>&1 || true
-          sqlite3 "$TCC" "select service, client, indirect_object_identifier, auth_value from access" 2>&1 | head -30 || true
-          sqlite3 "$TCC" ".schema access" 2>&1 | head -5 || true
-          echo "--- osascript, 90s"
-          start=$(date +%s); timeout 90 osascript -e 'tell application "Terminal" to get name'; echo "exit=$? after $(( $(date +%s) - start ))s"
-          echo "--- System Events, 30s"
-          timeout 30 osascript -e 'tell application "System Events" to get name'; echo "exit=$?"
-          pgrep -lf Terminal || true
+          now=$(date +%s)
+          clients="/usr/bin/osascript /bin/bash /bin/sh /bin/zsh $(command -v node)"
+          p=$$
+          while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+            clients="$clients $(ps -o comm= -p "$p")"
+            p=$(ps -o ppid= -p "$p" | tr -d ' ')
+          done
+          for c in $clients; do
+            case "$c" in /*) ;; *) c="$(command -v "$c" || echo "$c")" ;; esac
+            sqlite3 "$TCC" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, indirect_object_identifier_type, indirect_object_identifier, flags, last_modified) VALUES ('kTCCServiceAppleEvents', '$c', 1, 2, 3, 1, 0, 'com.apple.Terminal', 0, $now);"
+          done
+          killall tccd 2>/dev/null || true
+          sqlite3 "$TCC" "select client from access where service = 'kTCCServiceAppleEvents'"
+          echo "--- can osascript reach Terminal? (60s)"
+          perl -e 'alarm 60; exec @ARGV' osascript -e 'tell application "Terminal" to get name' && echo reachable || echo "not reachable: exit $?"
 
       - name: open, for real, in Terminal
         if: runner.os == 'macOS'
