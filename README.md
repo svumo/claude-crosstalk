@@ -80,11 +80,17 @@ Just ask, in plain words:
 | `/crosstalk setup yes` | Does it |
 | `/crosstalk add <name>` | Makes a new profile, ready to log in to |
 | `/crosstalk open <profile> [--model m] [--mode p] [message]` | Starts a session on that profile in a new terminal, in this folder, and sends it your message once it's up. `--model` and `--mode` set its model and permission mode |
-| `/crosstalk open-in auto\|vscode\|window` | Where `open` starts it. `auto` is an editor tab when you're in VS Code or VSCodium, else a new window. On its own, `/crosstalk open-in` says what `open` will do from this session and why |
+| `/crosstalk open-in auto\|app\|vscode\|window` | Where `open` starts it. `auto` is a tab in the Claude desktop app's Terminal panel when you're in the app, an editor tab when you're in VS Code or VSCodium, else a new window. On its own, `/crosstalk open-in` says what `open` will do from this session and why |
 | `/crosstalk editor auto\|code\|codium` | Which editor the tab opens in. `auto` spots VS Code or VSCodium from the terminal this session runs in |
 | `/crosstalk launch <profile> <command>` | The command that starts a profile, such as `claude zai`. Default: `claude-<profile>` |
 
 Every message that arrives is also shown to you in the transcript, as `Crosstalk ← sender`, so you don't have to ask whether anyone replied.
+
+### Opening a session in the Claude desktop app
+
+The desktop app signs in to one account, and its own sessions always run on that account. From a session in the app, `/crosstalk open mikey` (or "open a session on my mikey account and ask it to review this") starts the other profile in a new tab of the app's **Terminal panel**, so it runs inside the app on that profile's own login and subscription. Nothing else to install: Crosstalk uses the app's own Terminal tool, and the app asks you to approve the command, as it does for any command typed into the panel.
+
+The panel's shell is your PowerShell (or login shell) with your profile loaded, so launch commands such as `claude mikey` work there. Messages go both ways as usual, and the new session shows up in `/crosstalk` once it's up. `/crosstalk open-in window` goes back to a separate terminal window.
 
 ### Opening a session in VS Code or VSCodium
 
@@ -100,7 +106,7 @@ codium --install-extension <the plugin's folder>/vscode/crosstalk-terminal-0.3.0
 **Which editor it uses.** Each session works it out from the terminal it runs in, not from which editors are open. VS Code and VSCodium both mark their terminals as VS Code's, so Crosstalk tells them apart by the editor's own program path, which every VS Code-family terminal carries. A session in VSCodium opens the new tab in VSCodium, one in VS Code opens it in VS Code, and one in any other terminal opens a new window. To pin it, use `/crosstalk editor code` or `/crosstalk editor codium` (`auto` goes back to spotting it), or set `CLAUDE_CROSSTALK_EDITOR`. Run `/crosstalk open-in` on its own to see what it decided:
 
 ```
-New sessions open in: auto. Choices: auto, vscode, window.
+New sessions open in: auto. Choices: auto, app, vscode, window.
 From this session, open starts a VSCodium terminal tab.
 Editor: VSCodium (spotted from this session's terminal). Helper: installed.
 ```
@@ -271,7 +277,7 @@ Optional environment variables, set before you start a session:
 | `CLAUDE_CROSSTALK_NAME` | This session's profile name, over any other | From the folder |
 | `CLAUDE_CROSSTALK_DIR` | The shared folder. Set the same on every profile | `~/.claude-crosstalk` |
 | `CLAUDE_CROSSTALK_WAKE_LIMIT` | Wake-ups in a row before messages wait for you | 25 |
-| `CLAUDE_CROSSTALK_OPEN_IN` | Where `/crosstalk open` starts a session (`auto`, `vscode`, `window`), over the saved setting | `auto` |
+| `CLAUDE_CROSSTALK_OPEN_IN` | Where `/crosstalk open` starts a session (`auto`, `app`, `vscode`, `window`), over the saved setting | `auto` |
 | `CLAUDE_CROSSTALK_EDITOR` | Which editor `open` uses for the new terminal tab (`code` or `codium`), over `/crosstalk editor` and spotting it | `auto` |
 | `CLAUDE_CROSSTALK_TERMINAL` | On Linux, the terminal `open` tries first, such as `kitty` or `tmux` | The first one found |
 

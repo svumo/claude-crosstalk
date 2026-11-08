@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.0
+
+- From the Claude desktop app, `open` starts the other profile in a new tab of the app's Terminal panel, so a session on another account runs inside the app on its own login. It uses the app's own Terminal tool, so there's nothing to install, and the app asks you to approve the command. `auto` picks it whenever the session runs in the app; `/crosstalk open-in app` sets it, and `window` goes back to a terminal window.
+- A session opened from the app is found even when its shell reports the folder at the app's packaged path (`AppData\Local\Packages\…\LocalCache\Roaming`), so its first message reaches it.
+- `/crosstalk open-in` skips the editor-helper check when open won't use an editor tab.
+
 ## 1.4.1
 
 - `open` works in VSCodium. Each session spots its editor from the terminal it runs in: VSCodium's terminal gets the new session as a VSCodium tab, through `codium` and a `vscodium://` link, and VS Code's as before. Install the helper in VSCodium with `codium --install-extension <the plugin's folder>/vscode/crosstalk-terminal-0.3.0.vsix`.

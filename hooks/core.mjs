@@ -214,17 +214,25 @@ export function trustProject(jsonText, cwd) {
   return JSON.stringify({ ...data, projects: { ...projects, [key]: { ...entry, hasTrustDialogAccepted: true } } }, null, 2);
 }
 
-export const OPEN_IN = ["auto", "vscode", "window"];
+export const OPEN_IN = ["auto", "app", "vscode", "window"];
 
-// Where a new session opens. A variable wins, then the saved setting; `auto` means an editor tab
-// when this session runs in a VS Code-family terminal (VS Code or VSCodium) and the helper is
-// installed there, else a terminal window. `label` names the editor in the reason.
-export function chooseOpenIn(fromEnv, saved, termProgram, hasHelper, label = "VS Code") {
+// The Claude desktop app sets this on the Claude Code sessions it runs.
+export const DESKTOP_ENTRYPOINT = "claude-desktop";
+export const NOT_IN_APP = "this session isn't running in the Claude desktop app";
+
+// Where a new session opens. A variable wins, then the saved setting; `auto` means a tab in the
+// desktop app's Terminal panel when this session runs in the app, else an editor tab when it runs
+// in a VS Code-family terminal (VS Code or VSCodium) and the helper is installed there, else a
+// terminal window. `label` names the editor in the reason.
+export function chooseOpenIn(fromEnv, saved, termProgram, hasHelper, label = "VS Code", inApp = false) {
   const wanted = [fromEnv, saved].map((v) => String(v ?? "").trim().toLowerCase()).find((v) => OPEN_IN.includes(v)) ?? "auto";
   const inVsCode = String(termProgram ?? "").toLowerCase() === "vscode";
   const missing = `the Crosstalk terminal helper isn't installed in ${label}`;
   if (wanted === "window") {
     return { where: "window" };
+  }
+  if (wanted === "app" || (wanted === "auto" && inApp)) {
+    return inApp ? { where: "app" } : { where: "window", why: NOT_IN_APP };
   }
   if (wanted === "vscode" && !hasHelper) {
     return { where: "window", why: missing };
@@ -333,7 +341,11 @@ export function linuxArgv(terminal, cwd, command, shell) {
 }
 
 // The session that opened: the newest live one of that profile, in that folder, started since.
-const folderKey = (path) => String(path ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+// The Claude desktop app is a packaged Windows app, so a shell in its Terminal panel can see
+// %APPDATA% at its packaged spelling, AppData/Local/Packages/<package>/LocalCache/Roaming. Both
+// spellings are one folder.
+export const folderKey = (path) => String(path ?? "").replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase()
+  .replace(/\/appdata\/local\/packages\/[^/]+\/localcache\/(roaming|local)(?=\/|$)/, "/appdata/$1");
 
 export function findOpened(records, profile, cwd, since, now) {
   const folder = folderKey(cwd);

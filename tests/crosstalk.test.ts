@@ -494,6 +494,24 @@ test('where a session opens: the variable, then the setting, then VS Code if thi
   expect(chooseOpenIn('nonsense', 'window', 'vscode', true)).toEqual({ where: 'window' })
 })
 
+test('in the desktop app, auto and app open a tab of its Terminal panel', async () => {
+  expect(chooseOpenIn(undefined, undefined, '', false, 'VS Code', true)).toEqual({ where: 'app' })
+  expect(chooseOpenIn(undefined, 'app', '', false, 'VS Code', true)).toEqual({ where: 'app' })
+  expect(chooseOpenIn('app', 'window', '', false, 'VS Code', true)).toEqual({ where: 'app' })
+  expect(chooseOpenIn(undefined, 'window', '', false, 'VS Code', true)).toEqual({ where: 'window' })
+  expect(chooseOpenIn(undefined, 'vscode', '', true, 'VS Code', true)).toEqual({ where: 'vscode' })
+  expect(chooseOpenIn(undefined, 'app', 'vscode', true)).toEqual({ where: 'window', why: "this session isn't running in the Claude desktop app" })
+  expect(chooseOpenIn(undefined, undefined, 'vscode', true)).toEqual({ where: 'vscode' }) // not in the app: as before
+})
+
+test("a folder at the desktop app's packaged spelling is the same folder", async () => {
+  const plain = 'C:\\Users\\me\\AppData\\Roaming\\Claude\\scratch\\s1'
+  const packaged = 'C:\\Users\\me\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\scratch\\s1'
+  const r = { id: 'm', profile: 'mikey', address: 'mikey/s1-m', cwd: packaged, startedAt: NOW, seenAt: NOW }
+  expect(findOpened([r], 'mikey', plain, NOW - 5_000, NOW)?.id).toBe('m')
+  expect(findOpened([r], 'mikey', 'C:\\Users\\me\\AppData\\Roaming\\Claude\\scratch\\s2', NOW - 5_000, NOW)).toBe(null)
+})
+
 test('the VS Code link carries any folder whole', async () => {
   const cwd = 'C:\\Users\\me\\Local Sites\\a & b'
   const link = vscodeLink({ name: 'claude zai', cwd, cmd: 'claude zai' })
@@ -592,6 +610,41 @@ test('open-in alone says what open will do from here, and editor changes it', as
   expect(calls[calls.length - 1][0]).toBe('code')
   expect(await say($, 'editor auto')).toMatch(/Editor: auto\./)
   expect(await say($, 'open-in')).toMatch(/Editor: VSCodium \(spotted/)
+})
+
+test('from the desktop app, open types the launch command into a new Terminal panel tab', async ($, on) => {
+  const calls: any[] = []
+  const typed: any[] = []
+  let refuse = ''
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }, (e: any) => { calls.push(e.argv); return RAN_OK })
+  on('tool.call', { tool: 'mcp__terminal__run_in_terminal' }, (_: any, e: any) => {
+    typed.push(e)
+    return refuse ? { deny: refuse } : { result: [{ type: 'text', text: 'Started in new terminal tab "c1"' }] }
+  })
+  on('clock.sleep', () => ({ value: undefined }))
+  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey' } }))
+  await $.session.start(START)
+  const status = await say($, 'open-in')
+  expect(status).toMatch(/new tab in the Claude desktop app's Terminal panel/)
+  const ok: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'mikey', model: 'sonnet' } as never)
+  expect(JSON.stringify(ok)).toMatch(/Opening mikey \(claude mikey --model sonnet\) in a new tab of the app's Terminal panel/)
+  expect(typed.at(-1)).toMatchObject({ command: 'claude mikey --model sonnet', cwd: 'C:\\code\\proj', title: 'claude mikey' })
+  expect(calls.some((a) => a[0] === 'wt' || a.includes('--list-extensions'))).toBe(false) // no window, no editor check
+  refuse = 'The user declined'
+  expect(await say($, 'open mikey hi')).toMatch(/Terminal panel didn't run it: The user declined\. \/crosstalk open-in window/)
+  expect(await say($, 'open-in window')).toMatch(/open in: window/)
+  expect(await say($, 'open mikey')).toMatch(/new terminal window/)
+  expect(typed.length).toBe(2)
+})
+
+test('open-in app outside the desktop app opens a window, and says why', async ($, on) => {
+  const calls: any[] = []
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', CLAUDE_CROSSTALK_OPEN_IN: 'app' }, (e: any) => { calls.push(e.argv); return RAN_OK })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open-in')).toMatch(/Why a window: this session isn't running in the Claude desktop app/)
+  expect(await say($, 'open zai')).toMatch(/new terminal window, as this session isn't running in the Claude desktop app/)
+  expect(calls.some((a) => a[0] === 'wt')).toBe(true)
 })
 
 test('open-in window opens a terminal window, and the setting is kept', async ($, on) => {

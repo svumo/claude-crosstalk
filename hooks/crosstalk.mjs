@@ -16,7 +16,7 @@
 import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
-  chooseOpenIn, findOpened, HELPER_ID, isSafeLaunch, launchFor, OPEN_IN, PERMISSION_MODES, trustProject,
+  chooseOpenIn, DESKTOP_ENTRYPOINT, findOpened, HELPER_ID, isSafeLaunch, launchFor, NOT_IN_APP, OPEN_IN, PERMISSION_MODES, trustProject,
   vscodeLink, editorFor, EDITOR_CHOICES, helperInstall, windowArgv, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
   LINUX_TERMINALS,
 } from "./core.mjs";
@@ -33,6 +33,8 @@ const PRUNE_DAYS = 7;
 const SEND = "mcp__crosstalk__send";
 const LIST = "mcp__crosstalk__list";
 const OPEN = "mcp__crosstalk__open";
+// The desktop app's own tool that types a command into a new tab of its Terminal panel.
+const APP_TERMINAL = "mcp__terminal__run_in_terminal";
 // How long a session being opened has to show up, looked for once a second.
 const OPEN_WAIT_S = 90;
 const PROFILE_WORD = /^[a-z0-9][a-z0-9_-]{0,30}$/;
@@ -540,18 +542,23 @@ async function resolveOpening($, pc, setup) {
   const termProgram = await $.env.get("TERM_PROGRAM");
   const editor = editorFor(await $.env.get("CLAUDE_CROSSTALK_EDITOR"), setup.editor, await $.env.get("VSCODE_GIT_ASKPASS_NODE"));
   const wanted = String(fromEnv || setup.openIn || "auto").toLowerCase();
-  const checked = wanted !== "window";
+  const inApp = (await $.env.get("CLAUDE_CODE_ENTRYPOINT")) === DESKTOP_ENTRYPOINT;
+  // The editor helper only matters when open may use an editor tab.
+  const checked = wanted === "vscode" || (wanted !== "window" && wanted !== "app" && !inApp);
   const helper = checked ? await hasHelper($, pc, editor) : false;
-  const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper, editor.label);
+  const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper, editor.label, inApp);
   const inEditor = String(termProgram ?? "").toLowerCase() === "vscode";
-  return { fromEnv, editor, helper, checked, choice, inEditor };
+  return { fromEnv, editor, helper, checked, choice, inEditor, inApp };
 }
 
 // One line that says what `open` will do from here, and how to change it.
 function describeOpening(r, pluginRoot) {
+  if (r.choice.where === "app") {
+    return "From this session, open starts a new tab in the Claude desktop app's Terminal panel, as this session runs in the app. The app asks you to approve the command first.";
+  }
   const where = r.choice.where === "vscode" ? `a ${r.editor.label} terminal tab` : "a new terminal window";
   const how = { CLAUDE_CROSSTALK_EDITOR: "set by CLAUDE_CROSSTALK_EDITOR", saved: "set by /crosstalk editor", spotted: r.inEditor ? "spotted from this session's terminal" : "the default, as this session isn't in an editor terminal" }[r.editor.how];
-  const lines = [`From this session, open starts ${where}.`, `Editor: ${r.editor.label} (${how}). Helper: ${!r.checked ? "not checked, as open-in is window" : r.helper ? "installed" : "not found"}.`];
+  const lines = [`From this session, open starts ${where}.`, `Editor: ${r.editor.label} (${how}). Helper: ${!r.checked ? `not checked, as open-in is ${r.choice.why === NOT_IN_APP ? "app" : "window"}` : r.helper ? "installed" : "not found"}.`];
   if (r.choice.why) {
     lines.push(`Why a window: ${r.choice.why}.`);
   }
@@ -569,7 +576,7 @@ async function openInCommand($, value) {
     return `New sessions open in: ${setup.openIn ?? "auto"}${fromEnv ? ` (CLAUDE_CROSSTALK_OPEN_IN=${fromEnv} wins)` : ""}. Choices: ${OPEN_IN.join(", ")}.\n${now}`;
   }
   if (!OPEN_IN.includes(value)) {
-    return `Usage: /crosstalk open-in ${OPEN_IN.join("|")}. auto is an editor tab (VS Code or VSCodium) when this session runs in one, else a new terminal window.`;
+    return `Usage: /crosstalk open-in ${OPEN_IN.join("|")}. auto is a tab in the Claude desktop app's Terminal panel when this session runs in the app, an editor tab (VS Code or VSCodium) when it runs in one, else a new terminal window.`;
   }
   setup.openIn = value;
   await saveSetup($, setup);
@@ -690,7 +697,14 @@ async function openSession($, profile, message, opts = {}) {
   const since = await $.clock.now();
   let ran = null;
   let place = "a new terminal window";
-  if (choice.where === "vscode") {
+  if (choice.where === "app") {
+    const opened = await openInApp($, profile, command);
+    if (opened.error) {
+      return { error: opened.error };
+    }
+    place = "a new tab of the app's Terminal panel";
+    ran = { exitCode: 0 };
+  } else if (choice.where === "vscode") {
     place = `a new ${editor.label} terminal`;
     ran = await runCode($, pc, editor, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: me.cwd, cmd: command }, editor.scheme)]);
   } else {
@@ -710,6 +724,38 @@ async function openSession($, profile, message, opts = {}) {
   void watchOpened($, profile, since - 2_000, message).catch(() => {});
   const trust = isTrusted ? "" : ` Crosstalk couldn't mark this folder trusted for ${profile}, so it may stop at the folder-trust screen until someone answers it.`;
   return { text: `Opening ${profile} (${command}) in ${place}${choice.why ? `, as ${choice.why}` : ""}. Crosstalk says here when it is up${message.trim() ? ", then sends it your message" : ""}.${trust}` };
+}
+
+// A new tab in the Claude desktop app's Terminal panel, through the app's own tool, so the
+// session runs inside the app on that profile's account. The app shows the person the command to
+// approve. Its shell runs their profile, so `claude mikey`-style functions work there. Returns {}
+// or { error }.
+async function openInApp($, profile, command) {
+  const instead = "/crosstalk open-in window opens a terminal window instead.";
+  let answer;
+  try {
+    answer = await $.tool.call({ tool: APP_TERMINAL, command, cwd: me.cwd, title: `claude ${profile}` });
+  } catch (err) {
+    return { error: `Couldn't reach the app's Terminal panel (${String(err?.message ?? err).slice(0, 200)}). ${instead}` };
+  }
+  if (answer?.deny) {
+    return { error: `The app's Terminal panel didn't run it: ${String(answer.deny).slice(0, 300)}. ${instead}` };
+  }
+  if (answer?.isError) {
+    return { error: `The app's Terminal panel didn't run it: ${resultText(answer).slice(0, 300)}. ${instead}` };
+  }
+  return {};
+}
+
+function resultText(answer) {
+  const result = answer?.text ?? answer?.result;
+  if (typeof result === "string") {
+    return result;
+  }
+  if (Array.isArray(result)) {
+    return result.map((part) => part?.text ?? "").join(" ").trim();
+  }
+  return JSON.stringify(result ?? "");
 }
 
 // A new terminal on macOS (Terminal.app) or Linux (the first terminal found). Returns
@@ -792,7 +838,7 @@ async function startUp($) {
   });
   await $.tool.register({
     name: "open",
-    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in VS Code or VSCodium when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
+    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in a tab of the Claude desktop app's Terminal panel when this session runs in the app (so the profile's own account runs inside the app), in VS Code or VSCodium when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
     inputSchema: {
       type: "object",
       properties: {
