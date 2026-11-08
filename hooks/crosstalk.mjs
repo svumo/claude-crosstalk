@@ -17,7 +17,7 @@ import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
   chooseOpenIn, findOpened, HELPER_ID, isSafeLaunch, launchFor, OPEN_IN, PERMISSION_MODES, trustProject,
-  vscodeLink, windowArgv, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
+  vscodeLink, editorFor, windowArgv, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
   LINUX_TERMINALS,
 } from "./core.mjs";
 import {
@@ -515,17 +515,18 @@ async function writeMessage($, record, text, now) {
   await $.fs.write(`${root}/inbox/${record.id}/${name}`, JSON.stringify({ from: me.address, fromId: me.id, to: record.address, sentAt: now, text }));
 }
 
-// The VS Code command line. On Windows `code` is a .cmd that only cmd.exe starts.
-async function runCode($, pc, args) {
+// The VS Code (or VSCodium) command line. On Windows `code` and `codium` are .cmd files that
+// only cmd.exe starts.
+async function runCode($, pc, editor, args) {
   try {
-    return await $.process.run(["code", ...args], { timeoutMs: 30_000 });
+    return await $.process.run([editor.cli, ...args], { timeoutMs: 30_000 });
   } catch {
-    return pc.isWindows ? $.process.run(["cmd.exe", "/d", "/c", "code", ...args], { timeoutMs: 30_000 }).catch(() => null) : null;
+    return pc.isWindows ? $.process.run(["cmd.exe", "/d", "/c", editor.cli, ...args], { timeoutMs: 30_000 }).catch(() => null) : null;
   }
 }
 
-async function hasHelper($, pc) {
-  const listed = await runCode($, pc, ["--list-extensions"]);
+async function hasHelper($, pc, editor) {
+  const listed = await runCode($, pc, editor, ["--list-extensions"]);
   return Boolean(listed && listed.exitCode === 0 && listed.stdout.toLowerCase().split(/\r?\n/).map((l) => l.trim()).includes(HELPER_ID));
 }
 
@@ -634,15 +635,16 @@ async function openSession($, profile, message, opts = {}) {
   const isTrusted = await trustFolder($, pc, setup, profile).catch(() => false);
   const fromEnv = await $.env.get("CLAUDE_CROSSTALK_OPEN_IN");
   const termProgram = await $.env.get("TERM_PROGRAM");
+  const editor = editorFor(await $.env.get("CLAUDE_CROSSTALK_EDITOR"), await $.env.get("VSCODE_GIT_ASKPASS_NODE"));
   const wanted = String(fromEnv || setup.openIn || "auto").toLowerCase();
-  const helper = wanted === "window" ? false : await hasHelper($, pc);
+  const helper = wanted === "window" ? false : await hasHelper($, pc, editor);
   const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper);
   const since = await $.clock.now();
   let ran = null;
   let place = "a new terminal window";
   if (choice.where === "vscode") {
-    place = "a new VS Code terminal";
-    ran = await runCode($, pc, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: me.cwd, cmd: command })]);
+    place = `a new ${editor.label} terminal`;
+    ran = await runCode($, pc, editor, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: me.cwd, cmd: command }, editor.scheme)]);
   } else {
     const opener = pc.isWindows ? { argv: windowArgv(me.cwd, command) } : await unixWindow($, command);
     if (opener.error) {
@@ -742,7 +744,7 @@ async function startUp($) {
   });
   await $.tool.register({
     name: "open",
-    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in VS Code when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
+    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in VS Code or VSCodium when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
     inputSchema: {
       type: "object",
       properties: {

@@ -235,12 +235,30 @@ export function chooseOpenIn(fromEnv, saved, termProgram, hasHelper) {
 
 export const HELPER_ID = "svumo.crosstalk-terminal";
 
+// Which VS Code build this session runs in. VSCodium sets TERM_PROGRAM=vscode too, so it is told
+// apart by the path of its own executable in VSCODE_GIT_ASKPASS_NODE. CLAUDE_CROSSTALK_EDITOR
+// (code or codium) wins. Returns the command line, the link scheme and the name to show.
+export const EDITORS = {
+  code: { cli: "code", scheme: "vscode", label: "VS Code" },
+  codium: { cli: "codium", scheme: "vscodium", label: "VSCodium" },
+};
+export function editorFor(fromEnv, askpassNode) {
+  const wanted = String(fromEnv ?? "").trim().toLowerCase();
+  if (wanted === "codium" || wanted === "vscodium") {
+    return EDITORS.codium;
+  }
+  if (wanted === "code" || wanted === "vscode") {
+    return EDITORS.code;
+  }
+  return /codium/i.test(String(askpassNode ?? "")) ? EDITORS.codium : EDITORS.code;
+}
+
 // The link the VS Code helper answers. The ask travels as base64url JSON, so any folder name,
 // spaces and & included, comes through whole.
-export function vscodeLink(ask) {
+export function vscodeLink(ask, scheme = "vscode") {
   const json = JSON.stringify({ name: ask.name, cwd: ask.cwd, cmd: ask.cmd });
   const d = btoa(String.fromCharCode(...new TextEncoder().encode(json))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  return `vscode://${HELPER_ID}/open?d=${d}`;
+  return `${scheme}://${HELPER_ID}/open?d=${d}`;
 }
 
 // A new Windows Terminal window in the folder, running the command in PowerShell, where the

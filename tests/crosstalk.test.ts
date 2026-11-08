@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import {
   addressOf, frameMessages, isLive, LIVE_MS, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, SHOW_TEXT, showMessages, toolResultCount, toolUseCount,
-  chooseOpenIn, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
+  chooseOpenIn, editorFor, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
   linuxArgv, linuxCandidates, macArgv, parseOpenArgs, shQuote, userShell, whichArgv,
 } from '../hooks/core.mjs'
 import {
@@ -534,6 +534,32 @@ test('open runs the VS Code link, then hands the new session its first message',
   const sent = [...files.keys()].find((k: string) => k.startsWith(`${BOX}/inbox/zai-1/`))!
   expect(JSON.parse(files.get(sent)).text).toBe('say hello')
   expect(files.logs.some((l: string) => /zai\/proj-zai1 is up and has your message/.test(l))).toBe(true)
+})
+
+test('VSCodium is told apart from VS Code, and the variable wins', () => {
+  expect(editorFor(undefined, 'C:\\Program Files\\VSCodium\\VSCodium.exe')).toEqual({ cli: 'codium', scheme: 'vscodium', label: 'VSCodium' })
+  expect(editorFor(undefined, 'C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe').cli).toBe('code')
+  expect(editorFor(undefined, undefined).cli).toBe('code')
+  expect(editorFor('codium', undefined).cli).toBe('codium')
+  expect(editorFor('code', 'C:\\Program Files\\VSCodium\\VSCodium.exe').cli).toBe('code')
+  expect(vscodeLink({ name: 'a', cwd: 'b', cmd: 'claude' }, 'vscodium')).toMatch(/^vscodium:\/\/svumo\.crosstalk-terminal\/open\?d=/)
+})
+
+test('open in VSCodium uses codium and its own link', async ($, on) => {
+  const calls: any[] = []
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', TERM_PROGRAM: 'vscode', VSCODE_GIT_ASKPASS_NODE: 'C:\\Program Files\\VSCodium\\VSCodium.exe' }, (e: any) => {
+    calls.push(e.argv)
+    if (e.argv.includes('--list-extensions')) return { ...RAN_OK, stdout: 'svumo.crosstalk-terminal\n' }
+    return RAN_OK
+  })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open zai')).toMatch(/in a new VSCodium terminal/)
+  expect(calls.find((a) => a.includes('--list-extensions'))![0]).toBe('codium')
+  const open = calls.find((a) => a.includes('--open-url'))!
+  expect(open[0]).toBe('codium')
+  expect(open[open.length - 1]).toMatch(/^vscodium:\/\//)
+  expect(calls.some((a) => a[0] === 'code')).toBe(false)
 })
 
 test('open-in window opens a terminal window, and the setting is kept', async ($, on) => {
