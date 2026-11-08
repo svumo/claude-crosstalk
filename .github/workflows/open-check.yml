@@ -1,0 +1,118 @@
+# Runs the plugin tests and checks `open` for real on a macOS and/or Linux runner.
+# Started by hand (or by the /vm skill) with:
+#   gh workflow run open-check.yml -f os=macos-latest -f tmate=false
+# With tmate=true the runner is held open afterwards for SSH, which only the person who started
+# the run can use (their GitHub SSH keys); the address is posted as a notice on the job.
+name: open check
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: Runner
+        type: choice
+        options: [macos-latest, ubuntu-latest, both]
+        default: macos-latest
+      run:
+        description: A shell command to run on the runner after the checks
+        type: string
+        default: ""
+      tmate:
+        description: Hold the runner open for SSH afterwards (only you can connect)
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - "hooks/**"
+      - "scripts/open-check.mjs"
+      - "tests/**"
+      - ".github/workflows/open-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON((github.event_name != 'workflow_dispatch' || inputs.os == 'both') && '["macos-latest","ubuntu-latest"]' || format('["{0}"]', inputs.os)) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Claude Code
+        run: |
+          curl -fsSL https://claude.ai/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Plugin tests
+        run: claude plugin test .
+
+      - name: Linux terminals
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq tmux xterm xvfb
+
+      - name: open, for real, in tmux
+        if: runner.os == 'Linux'
+        run: node scripts/open-check.mjs --terminal tmux
+
+      - name: open, for real, in xterm
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node scripts/open-check.mjs --terminal xterm
+
+      # The first time something controls Terminal, macOS asks the person, and nobody is there to
+      # answer on a runner. Runners have SIP off and the runner user owns its own TCC database, so
+      # the answer is written there ahead of time: allowed, for this shell and everything above it
+      # (macOS asks on behalf of the app responsible for the process), and for osascript and node.
+      - name: Let this runner control Terminal
+        if: runner.os == 'macOS'
+        run: |
+          TCC="$HOME/Library/Application Support/com.apple.TCC/TCC.db"
+          now=$(date +%s)
+          clients="/usr/bin/osascript /bin/bash /bin/sh /bin/zsh $(command -v node)"
+          p=$$
+          while [ -n "$p" ] && [ "$p" -gt 1 ]; do
+            clients="$clients $(ps -o comm= -p "$p")"
+            p=$(ps -o ppid= -p "$p" | tr -d ' ')
+          done
+          for c in $clients; do
+            case "$c" in /*) ;; *) c="$(command -v "$c" || echo "$c")" ;; esac
+            sqlite3 "$TCC" "INSERT OR REPLACE INTO access (service, client, client_type, auth_value, auth_reason, auth_version, indirect_object_identifier_type, indirect_object_identifier, flags, last_modified) VALUES ('kTCCServiceAppleEvents', '$c', 1, 2, 3, 1, 0, 'com.apple.Terminal', 0, $now);"
+          done
+          killall tccd 2>/dev/null || true
+          sqlite3 "$TCC" "select client from access where service = 'kTCCServiceAppleEvents'"
+          echo "--- can osascript reach Terminal? (60s)"
+          perl -e 'alarm 60; exec @ARGV' osascript -e 'tell application "Terminal" to get name' && echo reachable || echo "not reachable: exit $?"
+
+      - name: open, for real, in Terminal
+        if: runner.os == 'macOS'
+        run: node scripts/open-check.mjs
+
+      # Passed through the environment, so the text is never pasted into the script itself.
+      - name: Your command
+        if: always() && inputs.run != ''
+        env:
+          RUN: ${{ inputs.run }}
+        run: bash -c "$RUN"
+
+      - name: Hold for SSH
+        if: always() && inputs.tmate
+        uses: mxschmitt/action-tmate@v3
+        with:
+          detached: true
+          limit-access-to-actor: true
+
+      # Step logs can't be read until the job ends, but a notice can, so the address goes there.
+      - name: Post the SSH address
+        if: always() && inputs.tmate
+        run: |
+          tmate_bin="$(command -v tmate || find /usr/local /opt "$RUNNER_TOOL_CACHE" -name tmate -type f -perm -u+x 2>/dev/null | head -1)"
+          for i in $(seq 1 30); do
+            address="$("$tmate_bin" -S /tmp/tmate.sock display -p '#{tmate_ssh}' 2>/dev/null || true)"
+            [ -n "$address" ] && break
+            sleep 2
+          done
+          echo "::notice title=tmate::${address:-no address; see the Hold for SSH step}"
+          echo "When you're done: touch /continue (or just exit), and the run ends."

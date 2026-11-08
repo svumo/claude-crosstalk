@@ -17,7 +17,8 @@ import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
   chooseOpenIn, findOpened, HELPER_ID, isSafeLaunch, launchFor, OPEN_IN, PERMISSION_MODES, trustProject,
-  vscodeLink, windowArgv, withLaunchFlags,
+  vscodeLink, editorFor, EDITOR_CHOICES, helperInstall, windowArgv, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
+  LINUX_TERMINALS,
 } from "./core.mjs";
 import {
   configDirsInShell, homeCandidates, isInstalled, isSafeFolder, isSafeName, isUnreadable, looksLikeProfile,
@@ -35,6 +36,9 @@ const OPEN = "mcp__crosstalk__open";
 // How long a session being opened has to show up, looked for once a second.
 const OPEN_WAIT_S = 90;
 const PROFILE_WORD = /^[a-z0-9][a-z0-9_-]{0,30}$/;
+// Marking a folder trusted: how many goes, and how long to wait before reading it back.
+const TRUST_TRIES = 3;
+const TRUST_CHECK_MS = 300;
 const MARKETPLACE = "svumo/claude-crosstalk";
 
 let limit = 25;
@@ -181,11 +185,18 @@ export function register(on) {
       return { text: await addProfile($, String(words[1] ?? "").toLowerCase()) };
     }
     if (word === "open") {
-      const opened = await openSession($, String(words[1] ?? "").toLowerCase(), words.slice(2).join(" "));
+      const parts = parseOpenArgs(words.slice(1));
+      if (parts.error) {
+        return { text: parts.error };
+      }
+      const opened = await openSession($, parts.profile, parts.message, { model: parts.model, permissionMode: parts.permissionMode });
       return { text: opened.error ?? opened.text };
     }
     if (word === "open-in") {
       return { text: await openInCommand($, String(words[1] ?? "").toLowerCase()) };
+    }
+    if (word === "editor") {
+      return { text: await editorCommand($, String(words[1] ?? "").toLowerCase()) };
     }
     if (word === "launch") {
       return { text: await launchCommand($, String(words[1] ?? "").toLowerCase(), words.slice(2).join(" ")) };
@@ -507,32 +518,83 @@ async function writeMessage($, record, text, now) {
   await $.fs.write(`${root}/inbox/${record.id}/${name}`, JSON.stringify({ from: me.address, fromId: me.id, to: record.address, sentAt: now, text }));
 }
 
-// The VS Code command line. On Windows `code` is a .cmd that only cmd.exe starts.
-async function runCode($, pc, args) {
+// The VS Code (or VSCodium) command line. On Windows `code` and `codium` are .cmd files that
+// only cmd.exe starts.
+async function runCode($, pc, editor, args) {
   try {
-    return await $.process.run(["code", ...args], { timeoutMs: 30_000 });
+    return await $.process.run([editor.cli, ...args], { timeoutMs: 30_000 });
   } catch {
-    return pc.isWindows ? $.process.run(["cmd.exe", "/d", "/c", "code", ...args], { timeoutMs: 30_000 }).catch(() => null) : null;
+    return pc.isWindows ? $.process.run(["cmd.exe", "/d", "/c", editor.cli, ...args], { timeoutMs: 30_000 }).catch(() => null) : null;
   }
 }
 
-async function hasHelper($, pc) {
-  const listed = await runCode($, pc, ["--list-extensions"]);
+async function hasHelper($, pc, editor) {
+  const listed = await runCode($, pc, editor, ["--list-extensions"]);
   return Boolean(listed && listed.exitCode === 0 && listed.stdout.toLowerCase().split(/\r?\n/).map((l) => l.trim()).includes(HELPER_ID));
+}
+
+// Where `open` would put a new session from this one, and why: the editor (spotted from this
+// session's terminal, or set), whether its helper is installed, and the choice that follows.
+async function resolveOpening($, pc, setup) {
+  const fromEnv = await $.env.get("CLAUDE_CROSSTALK_OPEN_IN");
+  const termProgram = await $.env.get("TERM_PROGRAM");
+  const editor = editorFor(await $.env.get("CLAUDE_CROSSTALK_EDITOR"), setup.editor, await $.env.get("VSCODE_GIT_ASKPASS_NODE"));
+  const wanted = String(fromEnv || setup.openIn || "auto").toLowerCase();
+  const checked = wanted !== "window";
+  const helper = checked ? await hasHelper($, pc, editor) : false;
+  const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper, editor.label);
+  const inEditor = String(termProgram ?? "").toLowerCase() === "vscode";
+  return { fromEnv, editor, helper, checked, choice, inEditor };
+}
+
+// One line that says what `open` will do from here, and how to change it.
+function describeOpening(r, pluginRoot) {
+  const where = r.choice.where === "vscode" ? `a ${r.editor.label} terminal tab` : "a new terminal window";
+  const how = { CLAUDE_CROSSTALK_EDITOR: "set by CLAUDE_CROSSTALK_EDITOR", saved: "set by /crosstalk editor", spotted: r.inEditor ? "spotted from this session's terminal" : "the default, as this session isn't in an editor terminal" }[r.editor.how];
+  const lines = [`From this session, open starts ${where}.`, `Editor: ${r.editor.label} (${how}). Helper: ${!r.checked ? "not checked, as open-in is window" : r.helper ? "installed" : "not found"}.`];
+  if (r.choice.why) {
+    lines.push(`Why a window: ${r.choice.why}.`);
+  }
+  if (r.checked && !r.helper && (r.inEditor || r.choice.why)) {
+    lines.push(`Install the helper: ${helperInstall(r.editor, pluginRoot)}, then reload the ${r.editor.label} window.`);
+  }
+  return lines.join("\n");
 }
 
 async function openInCommand($, value) {
   const setup = await readJson($, `${root}/setup.json`, {});
   if (value === "") {
     const fromEnv = await $.env.get("CLAUDE_CROSSTALK_OPEN_IN");
-    return `New sessions open in: ${setup.openIn ?? "auto"}${fromEnv ? ` (CLAUDE_CROSSTALK_OPEN_IN=${fromEnv} wins)` : ""}. Choices: ${OPEN_IN.join(", ")}.`;
+    const now = describeOpening(await resolveOpening($, await computer($), setup), $.plugin.root);
+    return `New sessions open in: ${setup.openIn ?? "auto"}${fromEnv ? ` (CLAUDE_CROSSTALK_OPEN_IN=${fromEnv} wins)` : ""}. Choices: ${OPEN_IN.join(", ")}.\n${now}`;
   }
   if (!OPEN_IN.includes(value)) {
-    return `Usage: /crosstalk open-in ${OPEN_IN.join("|")}. auto is VS Code when this session runs there, else a new terminal window.`;
+    return `Usage: /crosstalk open-in ${OPEN_IN.join("|")}. auto is an editor tab (VS Code or VSCodium) when this session runs in one, else a new terminal window.`;
   }
   setup.openIn = value;
   await saveSetup($, setup);
   return `New sessions open in: ${value}.`;
+}
+
+// Which editor the tab opens in: auto spots VS Code or VSCodium from this session's terminal.
+async function editorCommand($, value) {
+  const setup = await readJson($, `${root}/setup.json`, {});
+  const fromEnv = await $.env.get("CLAUDE_CROSSTALK_EDITOR");
+  const wins = fromEnv ? ` (CLAUDE_CROSSTALK_EDITOR=${fromEnv} wins)` : "";
+  if (value === "") {
+    return `Editor: ${setup.editor ?? "auto"}${wins}. Choices: ${EDITOR_CHOICES.join(", ")}. auto spots VS Code or VSCodium from the terminal this session runs in.`;
+  }
+  const word = { vscode: "code", vscodium: "codium" }[value] ?? value;
+  if (!EDITOR_CHOICES.includes(word)) {
+    return `Usage: /crosstalk editor ${EDITOR_CHOICES.join("|")}. auto spots VS Code or VSCodium from the terminal this session runs in.`;
+  }
+  if (word === "auto") {
+    delete setup.editor;
+  } else {
+    setup.editor = word;
+  }
+  await saveSetup($, setup);
+  return `Editor: ${word}${wins}.`;
 }
 
 async function launchCommand($, profile, command) {
@@ -568,23 +630,33 @@ async function trustFolder($, pc, setup, profile) {
   }
   let isTrusted = false;
   for (const path of paths) {
+    isTrusted = (await trustFile($, path)) || isTrusted;
+  }
+  return isTrusted;
+}
+
+// A session already running on that profile rewrites the file now and then, and may write over
+// the change with its own copy. So the file is read back after a moment, and marked again if the
+// mark is gone. Returns true when the file says trusted.
+async function trustFile($, path) {
+  for (let attempt = 0; attempt < TRUST_TRIES; attempt += 1) {
     const text = await readText($, path);
     if (text === null) {
-      continue;
+      return false;
     }
     const next = trustProject(text, me.cwd);
     if (next === null) {
-      isTrusted = isTrusted || parsesAsObject(text); // already trusted, or not safe to touch
-      continue;
+      return parsesAsObject(text); // already trusted, or not safe to touch
     }
     try {
       await $.fs.write(path, next);
-      isTrusted = true;
     } catch {
-      // leave it; the launch still goes ahead
+      return false; // the launch still goes ahead
     }
+    await $.clock.sleep(TRUST_CHECK_MS);
   }
-  return isTrusted;
+  const last = await readText($, path);
+  return last !== null && trustProject(last, me.cwd) === null && parsesAsObject(last);
 }
 
 function parsesAsObject(text) {
@@ -601,7 +673,7 @@ function parsesAsObject(text) {
 // or { error }.
 async function openSession($, profile, message, opts = {}) {
   if (!PROFILE_WORD.test(profile)) {
-    return { error: "Usage: /crosstalk open <profile> [first message], such as /crosstalk open zai say hello." };
+    return { error: "Usage: /crosstalk open <profile> [--model <model>] [--mode <permission mode>] [first message], such as /crosstalk open zai --mode plan say hello." };
   }
   const setup = await readJson($, `${root}/setup.json`, {});
   const flagged = withLaunchFlags(launchFor(profile, setup), opts);
@@ -614,27 +686,55 @@ async function openSession($, profile, message, opts = {}) {
   }
   const pc = await computer($);
   const isTrusted = await trustFolder($, pc, setup, profile).catch(() => false);
-  const fromEnv = await $.env.get("CLAUDE_CROSSTALK_OPEN_IN");
-  const termProgram = await $.env.get("TERM_PROGRAM");
-  const wanted = String(fromEnv || setup.openIn || "auto").toLowerCase();
-  const helper = wanted === "window" ? false : await hasHelper($, pc);
-  const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper);
+  const { editor, choice } = await resolveOpening($, pc, setup);
   const since = await $.clock.now();
   let ran = null;
+  let place = "a new terminal window";
   if (choice.where === "vscode") {
-    ran = await runCode($, pc, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: me.cwd, cmd: command })]);
-  } else if (pc.isWindows) {
-    ran = await $.process.run(windowArgv(me.cwd, command), { timeoutMs: 30_000 }).catch(() => null);
+    place = `a new ${editor.label} terminal`;
+    ran = await runCode($, pc, editor, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: me.cwd, cmd: command }, editor.scheme)]);
   } else {
-    return { error: "A new terminal window is only opened on Windows so far. In VS Code, install the Crosstalk terminal helper and use /crosstalk open-in vscode." };
+    const opener = pc.isWindows ? { argv: windowArgv(me.cwd, command) } : await unixWindow($, command);
+    if (opener.error) {
+      return { error: opener.error };
+    }
+    place = opener.place ?? place;
+    ran = await $.process.run(opener.argv, { timeoutMs: opener.timeoutMs ?? 30_000 }).catch(() => null);
+    if (opener.isMac && ran && ran.exitCode !== 0 && /-1743|not authori[sz]ed/i.test(ran.stderr ?? "")) {
+      return { error: "macOS didn't let Crosstalk control Terminal. Allow it in System Settings > Privacy & Security > Automation, under the app this session runs in, then try again." };
+    }
   }
   if (!ran || ran.exitCode !== 0) {
-    return { error: `Couldn't open a ${choice.where === "vscode" ? "VS Code terminal" : "terminal window"}${ran?.stderr ? `: ${ran.stderr.trim().slice(0, 200)}` : "."}` };
+    return { error: `Couldn't open ${place}${ran?.stderr ? `: ${ran.stderr.trim().slice(0, 200)}` : "."}` };
   }
-  void watchOpened($, profile, since - 2_000, message);
-  const place = choice.where === "vscode" ? "a new VS Code terminal" : "a new terminal window";
+  void watchOpened($, profile, since - 2_000, message).catch(() => {});
   const trust = isTrusted ? "" : ` Crosstalk couldn't mark this folder trusted for ${profile}, so it may stop at the folder-trust screen until someone answers it.`;
   return { text: `Opening ${profile} (${command}) in ${place}${choice.why ? `, as ${choice.why}` : ""}. Crosstalk says here when it is up${message.trim() ? ", then sends it your message" : ""}.${trust}` };
+}
+
+// A new terminal on macOS (Terminal.app) or Linux (the first terminal found). Returns
+// { argv, place } or { error }.
+async function unixWindow($, command) {
+  const system = await $.process.run(["uname", "-s"], { timeoutMs: 10_000 }).catch(() => null);
+  if (String(system?.stdout ?? "").trim() === "Darwin") {
+    // The first time, macOS asks the person whether this may control Terminal, and osascript
+    // waits for the answer, so it gets two minutes.
+    return { argv: macArgv(me.cwd, command), place: "a new Terminal window", isMac: true, timeoutMs: 120_000 };
+  }
+  const candidates = linuxCandidates({
+    wanted: await $.env.get("CLAUDE_CROSSTALK_TERMINAL"),
+    inTmux: Boolean(await $.env.get("TMUX")),
+    hasDisplay: Boolean((await $.env.get("DISPLAY")) || (await $.env.get("WAYLAND_DISPLAY"))),
+  });
+  const found = candidates.length
+    ? await $.process.run(whichArgv(candidates), { timeoutMs: 10_000 }).catch(() => null)
+    : null;
+  const terminal = String(found?.stdout ?? "").trim();
+  if (!LINUX_TERMINALS.includes(terminal)) {
+    return { error: `Couldn't find a terminal to open: Crosstalk looks for ${LINUX_TERMINALS.join(", ")}${candidates.includes("tmux") ? "" : " (tmux only from inside tmux)"}, and the desktop ones need a display. Set CLAUDE_CROSSTALK_TERMINAL to choose one, or use VS Code with the Crosstalk terminal helper.` };
+  }
+  const shell = await $.env.get("SHELL");
+  return { argv: linuxArgv(terminal, me.cwd, command, shell), place: terminal === "tmux" ? "a new tmux window" : `a new ${terminal} window` };
 }
 
 async function watchOpened($, profile, since, message) {
@@ -692,7 +792,7 @@ async function startUp($) {
   });
   await $.tool.register({
     name: "open",
-    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in VS Code when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
+    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in VS Code or VSCodium when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
     inputSchema: {
       type: "object",
       properties: {
@@ -705,7 +805,7 @@ async function startUp($) {
     },
     isDeferred: false,
   });
-  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. open <profile> [message] starts one; open-in and launch set how; setup connects profiles; add <name> makes one; off and on pause it." });
+  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. open <profile> [--model m] [--mode p] [message] starts one; open-in, editor and launch set how (open-in alone shows what it will do); setup connects profiles; add <name> makes one; off and on pause it." });
   $.clock.every(BEAT_MS, () => beat($).catch(() => {}));
   $.clock.every(POLL_MS, () => poll($).catch(() => {}));
   void prune($);

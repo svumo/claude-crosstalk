@@ -3,7 +3,8 @@ import { expect, test } from 'claude-code/testing'
 import {
   addressOf, frameMessages, isLive, LIVE_MS, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, SHOW_TEXT, showMessages, toolResultCount, toolUseCount,
-  chooseOpenIn, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
+  chooseOpenIn, editorFor, EDITORS, helperInstall, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
+  linuxArgv, linuxCandidates, macArgv, parseOpenArgs, shQuote, userShell, whichArgv,
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -86,8 +87,10 @@ test('tool calls and results are counted, so a message never lands between them'
   expect(toolUseCount('plain')).toBe(0)
 })
 
-// The mod itself, with a folder in memory standing for the disk. The host hands paths over in Windows spelling.
-const slash = (path: string) => path.replace(/\\/g, '/').replace(/^[A-Za-z]:(?=\/home\/me)/, '') // and may add a drive to a Unix path
+// The mod itself, with a folder in memory standing for the disk. On Windows the host hands paths
+// over in Windows spelling, and may add a drive to a Unix path. On macOS and Linux a Windows path
+// isn't absolute, so the host puts the working folder in front of it: that part is dropped.
+const slash = (path: string) => path.replace(/\\/g, '/').replace(/^.*?(?=(?<![A-Za-z])[A-Za-z]:\/)/, '').replace(/^[A-Za-z]:(?=\/home\/me)/, '')
 
 const RAN_OK = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
 
@@ -430,6 +433,46 @@ test('open can set the model and permission mode, and nothing that breaks the la
   for (const opts of [{ model: 'glm-5.3', permissionMode: 'dontAsk' }, { model: 'opus', permissionMode: 'auto' }]) expect(isSafeLaunch(withLaunchFlags('claude-work', opts).command)).toBe(true)
 })
 
+test('a permission mode is matched whatever its case', async () => {
+  expect(withLaunchFlags('claude', { permissionMode: 'acceptedits' })).toEqual({ command: 'claude --permission-mode acceptEdits' })
+  expect(withLaunchFlags('claude', { permissionMode: 'PLAN' })).toEqual({ command: 'claude --permission-mode plan' })
+  expect(withLaunchFlags('claude', { permissionMode: 'BypassPermissions' }).error).toMatch(/isn't a permission mode/)
+})
+
+test('/crosstalk open reads --model and --mode after the profile, and the rest is the message', async () => {
+  expect(parseOpenArgs(['Mikey', '--model', 'sonnet', '--mode=plan', 'say', 'hi'])).toEqual({ profile: 'mikey', model: 'sonnet', permissionMode: 'plan', message: 'say hi' })
+  expect(parseOpenArgs(['zai', '--permission-mode', 'auto'])).toEqual({ profile: 'zai', model: '', permissionMode: 'auto', message: '' })
+  expect(parseOpenArgs(['zai', 'use', '--model', 'x'])).toEqual({ profile: 'zai', model: '', permissionMode: '', message: 'use --model x' })
+  expect(parseOpenArgs(['zai', '--fast']).error).toMatch(/Unknown option --fast/)
+  expect(parseOpenArgs(['zai', '--model']).error).toMatch(/needs a value/)
+  expect(parseOpenArgs(['zai', '--mode=']).error).toMatch(/needs a value/)
+  expect(parseOpenArgs([])).toEqual({ profile: '', model: '', permissionMode: '', message: '' })
+})
+
+test('on macOS a Terminal window opens in the folder, however the folder is named', async () => {
+  expect(shQuote("it's here")).toBe("'it'\\''s here'")
+  const argv = macArgv('/Users/me/a "b" \\c', 'claude-mikey --model sonnet')
+  expect(argv.slice(0, 2)).toEqual(['osascript', '-e'])
+  expect(argv[2]).toBe('tell application "Terminal" to do script "cd \'/Users/me/a \\"b\\" \\\\c\' && claude-mikey --model sonnet"')
+  expect(argv.slice(3)).toEqual(['-e', 'tell application "Terminal" to activate'])
+})
+
+test('on Linux the terminal is tmux when inside it, else the first desktop one, and a chosen one first', async () => {
+  expect(linuxCandidates({ inTmux: true, hasDisplay: false })).toEqual(['tmux'])
+  expect(linuxCandidates({ inTmux: false, hasDisplay: false })).toEqual([])
+  expect(linuxCandidates({ inTmux: false, hasDisplay: true })[0]).toBe('gnome-terminal')
+  expect(linuxCandidates({ wanted: 'Kitty', inTmux: true, hasDisplay: true }).slice(0, 2)).toEqual(['kitty', 'tmux'])
+  expect(linuxCandidates({ wanted: 'rm', inTmux: false, hasDisplay: true })).not.toContain('rm')
+  expect(whichArgv(['tmux', 'xterm']).slice(-2)).toEqual(['tmux', 'xterm'])
+  expect(userShell('/usr/bin/zsh')).toBe('/usr/bin/zsh')
+  for (const bad of [undefined, '', 'zsh', '/bin/sh; rm', '/bin/$(x)']) expect(userShell(bad)).toBe('/bin/bash')
+  const run = ['/bin/zsh', '-ic', "cd '/home/me/my proj' && claude-mikey; exec /bin/zsh"]
+  expect(linuxArgv('tmux', '/home/me/my proj', 'claude-mikey', '/bin/zsh')).toEqual(['tmux', 'new-window', '-c', '/home/me/my proj', ...run])
+  expect(linuxArgv('gnome-terminal', '/home/me/my proj', 'claude-mikey', '/bin/zsh')).toEqual(['gnome-terminal', '--', ...run])
+  expect(linuxArgv('kitty', '/home/me/my proj', 'claude-mikey', '/bin/zsh')).toEqual(['sh', '-c', 'nohup "$@" >/dev/null 2>&1 &', 'sh', 'kitty', ...run])
+  expect(linuxArgv('xterm', '/home/me/my proj', 'claude-mikey', '/bin/zsh').slice(4)).toEqual(['xterm', '-e', ...run])
+})
+
 test('a folder is marked trusted in a profile record, and nothing else changes', async () => {
   const added = JSON.parse(trustProject('', 'C:\\code\\proj')!)
   expect(added).toEqual({ projects: { 'C:/code/proj': { hasTrustDialogAccepted: true } } })
@@ -493,6 +536,64 @@ test('open runs the VS Code link, then hands the new session its first message',
   expect(files.logs.some((l: string) => /zai\/proj-zai1 is up and has your message/.test(l))).toBe(true)
 })
 
+test('VSCodium is told apart from VS Code, and the variable wins', () => {
+  const codium = 'C:\\Program Files\\VSCodium\\VSCodium.exe'
+  expect(editorFor(undefined, undefined, codium)).toEqual({ cli: 'codium', scheme: 'vscodium', label: 'VSCodium', how: 'spotted' })
+  expect(editorFor(undefined, undefined, 'C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe').cli).toBe('code')
+  expect(editorFor(undefined, undefined, undefined).cli).toBe('code')
+  expect(editorFor('codium', undefined, undefined)).toMatchObject({ cli: 'codium', how: 'CLAUDE_CROSSTALK_EDITOR' })
+  expect(editorFor('code', 'codium', codium)).toMatchObject({ cli: 'code', how: 'CLAUDE_CROSSTALK_EDITOR' })
+  expect(editorFor(undefined, 'code', codium)).toMatchObject({ cli: 'code', how: 'saved' })
+  expect(editorFor('nonsense', 'auto', codium)).toMatchObject({ cli: 'codium', how: 'spotted' })
+  expect(chooseOpenIn(undefined, undefined, 'vscode', false, 'VSCodium').why).toBe("the Crosstalk terminal helper isn't installed in VSCodium")
+  expect(helperInstall(EDITORS.codium, 'C:\\plug\\crosstalk\\1.4.1\\')).toBe('codium --install-extension "C:\\plug\\crosstalk\\1.4.1/vscode/crosstalk-terminal-0.3.0.vsix"')
+  expect(vscodeLink({ name: 'a', cwd: 'b', cmd: 'claude' }, 'vscodium')).toMatch(/^vscodium:\/\/svumo\.crosstalk-terminal\/open\?d=/)
+})
+
+test('open in VSCodium uses codium and its own link', async ($, on) => {
+  const calls: any[] = []
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', TERM_PROGRAM: 'vscode', VSCODE_GIT_ASKPASS_NODE: 'C:\\Program Files\\VSCodium\\VSCodium.exe' }, (e: any) => {
+    calls.push(e.argv)
+    if (e.argv.includes('--list-extensions')) return { ...RAN_OK, stdout: 'svumo.crosstalk-terminal\n' }
+    return RAN_OK
+  })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open zai')).toMatch(/in a new VSCodium terminal/)
+  expect(calls.find((a) => a.includes('--list-extensions'))![0]).toBe('codium')
+  const open = calls.find((a) => a.includes('--open-url'))!
+  expect(open[0]).toBe('codium')
+  expect(open[open.length - 1]).toMatch(/^vscodium:\/\//)
+  expect(calls.some((a) => a[0] === 'code')).toBe(false)
+})
+
+test('open-in alone says what open will do from here, and editor changes it', async ($, on) => {
+  let listed = 'svumo.crosstalk-terminal\n'
+  const calls: any[] = []
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', TERM_PROGRAM: 'vscode', VSCODE_GIT_ASKPASS_NODE: 'C:\\Program Files\\VSCodium\\VSCodium.exe' }, (e: any) => {
+    calls.push(e.argv)
+    if (e.argv.includes('--list-extensions')) return { ...RAN_OK, stdout: listed }
+    return RAN_OK
+  })
+  await $.session.start(START)
+  let text = await say($, 'open-in')
+  expect(text).toMatch(/open starts a VSCodium terminal tab/)
+  expect(text).toMatch(/Editor: VSCodium \(spotted from this session's terminal\)\. Helper: installed/)
+  listed = 'aaron-bond.better-comments\n'
+  text = await say($, 'open-in')
+  expect(text).toMatch(/open starts a new terminal window/)
+  expect(text).toMatch(/helper isn't installed in VSCodium/)
+  expect(text).toMatch(/Install the helper: codium --install-extension ".*crosstalk-terminal-0\.3\.0\.vsix"/)
+  expect(await say($, 'editor sideways')).toMatch(/Usage: \/crosstalk editor auto\|code\|codium/)
+  expect(await say($, 'editor vscode')).toMatch(/Editor: code\./)
+  expect(await say($, 'editor')).toMatch(/Editor: code\. Choices/)
+  listed = 'svumo.crosstalk-terminal\n'
+  expect(await say($, 'open-in')).toMatch(/Editor: VS Code \(set by \/crosstalk editor\)/)
+  expect(calls[calls.length - 1][0]).toBe('code')
+  expect(await say($, 'editor auto')).toMatch(/Editor: auto\./)
+  expect(await say($, 'open-in')).toMatch(/Editor: VSCodium \(spotted/)
+})
+
 test('open-in window opens a terminal window, and the setting is kept', async ($, on) => {
   const calls: any[] = []
   fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', TERM_PROGRAM: 'vscode' }, (e: any) => { calls.push(e.argv); return RAN_OK })
@@ -500,7 +601,10 @@ test('open-in window opens a terminal window, and the setting is kept', async ($
   await $.session.start(START)
   expect(await say($, 'open-in sideways')).toMatch(/Usage/)
   expect(await say($, 'open-in window')).toMatch(/open in: window/)
-  expect(await say($, 'open-in')).toMatch(/open in: window/)
+  const status = await say($, 'open-in')
+  expect(status).toMatch(/open in: window/)
+  expect(status).toMatch(/Helper: not checked, as open-in is window/)
+  expect(status).not.toMatch(/Install the helper/)
   const opened = await say($, 'open zai')
   expect(opened).toMatch(/new terminal window/)
   expect(opened).toMatch(/may stop at the folder-trust screen/) // no zai profile to mark
@@ -524,4 +628,70 @@ test('the open tool passes the model and permission mode on, and refuses bypassP
   expect(calls.find((a) => a[0] === 'wt')!.at(-1)).toBe('claude --model sonnet --permission-mode plan')
   expect(JSON.parse(files.get('C:/home/.claude/.claude.json')).projects['C:/code/proj'].hasTrustDialogAccepted).toBe(true)
   expect(files.get('C:/home/.claude.json')).toBe('{"projects":{"C:/code/proj":{"hasTrustDialogAccepted":true}}}') // already trusted: left as it was
+})
+
+test('/crosstalk open takes --model and --mode, and says what is wrong with a bad one', async ($, on) => {
+  const calls: any[] = []
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', CLAUDE_CROSSTALK_OPEN_IN: 'window' }, (e: any) => { calls.push(e.argv); return RAN_OK })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open zai --fast hi')).toMatch(/Unknown option --fast/)
+  expect(await say($, 'open zai --mode bypassPermissions hi')).toMatch(/isn't a permission mode/)
+  expect(calls.some((a) => a[0] === 'wt')).toBe(false)
+  expect(await say($, 'open zai --model opus --mode acceptedits review it')).toMatch(/Opening zai \(claude-zai --model opus --permission-mode acceptEdits\)/)
+  expect(calls.find((a) => a[0] === 'wt')!.at(-1)).toBe('claude-zai --model opus --permission-mode acceptEdits')
+})
+
+test('a trust mark written over by a running session is put back', async ($, on) => {
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', CLAUDE_CROSSTALK_OPEN_IN: 'window' })
+  const record = 'C:/home/.claude-zai/.claude.json'
+  const original = JSON.stringify({ numStartups: 5 })
+  let clobbers = 1
+  let always = false
+  on('clock.sleep', () => { if (always || clobbers-- > 0) files.set(record, original); return { value: undefined } })
+  seed(files, 'C:/home/.claude-zai', { '.claude.json': original })
+  await $.session.start(START)
+  expect(await say($, 'open zai')).not.toMatch(/trust/)
+  expect(JSON.parse(files.get(record))).toEqual({ numStartups: 5, projects: { 'C:/code/proj': { hasTrustDialogAccepted: true } } })
+  always = true
+  files.set(record, original)
+  expect(await say($, 'open zai')).toMatch(/may stop at the folder-trust screen/)
+})
+
+const UNIX_ENV = { HOME: '/home/me', CLAUDE_CONFIG_DIR: '/home/me/.claude-work', SHELL: '/bin/zsh', CLAUDE_CROSSTALK_OPEN_IN: 'window' }
+
+test('on macOS open starts a Terminal window', async ($, on) => {
+  const calls: any[] = []
+  let refused = false
+  fakeDisk(on, UNIX_ENV, (e: any) => {
+    calls.push(e)
+    if (e.argv[0] === 'uname') return { ...RAN_OK, stdout: 'Darwin\n' }
+    if (e.argv[0] === 'osascript' && refused) return { ...RAN_OK, exitCode: 1, stderr: 'execution error: Not authorized to send Apple events to Terminal. (-1743)' }
+    return RAN_OK
+  })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open mikey --mode plan')).toMatch(/Opening mikey \(claude-mikey --permission-mode plan\) in a new Terminal window/)
+  const osascript = calls.find((c) => c.argv[0] === 'osascript')
+  expect(osascript.argv).toEqual(macArgv('C:\\code\\proj', 'claude-mikey --permission-mode plan'))
+  expect(osascript.init?.timeoutMs ?? osascript.timeoutMs).toBe(120_000) // time to answer macOS's first-time prompt
+  refused = true
+  expect(await say($, 'open mikey')).toMatch(/Privacy & Security > Automation/)
+})
+
+test('on Linux open uses the terminal it finds, and says so when there is none', async ($, on) => {
+  const calls: any[] = []
+  let installed = 'konsole\n'
+  fakeDisk(on, { ...UNIX_ENV, DISPLAY: ':0' }, (e: any) => {
+    calls.push(e.argv)
+    if (e.argv[0] === 'uname') return { ...RAN_OK, stdout: 'Linux\n' }
+    if (e.argv[0] === 'sh' && e.argv[2].startsWith('for t')) return installed ? { ...RAN_OK, stdout: installed } : { ...RAN_OK, exitCode: 1 }
+    return RAN_OK
+  })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open mikey')).toMatch(/in a new konsole window/)
+  expect(calls.at(-1)).toEqual(linuxArgv('konsole', 'C:\\code\\proj', 'claude-mikey', '/bin/zsh'))
+  installed = ''
+  expect(await say($, 'open mikey')).toMatch(/Couldn't find a terminal to open/)
 })
