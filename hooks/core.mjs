@@ -216,41 +216,54 @@ export function trustProject(jsonText, cwd) {
 
 export const OPEN_IN = ["auto", "vscode", "window"];
 
-// Where a new session opens. A variable wins, then the saved setting; `auto` means VS Code when
-// this session runs in VS Code's terminal and the helper is there, else a terminal window.
-export function chooseOpenIn(fromEnv, saved, termProgram, hasHelper) {
+// Where a new session opens. A variable wins, then the saved setting; `auto` means an editor tab
+// when this session runs in a VS Code-family terminal (VS Code or VSCodium) and the helper is
+// installed there, else a terminal window. `label` names the editor in the reason.
+export function chooseOpenIn(fromEnv, saved, termProgram, hasHelper, label = "VS Code") {
   const wanted = [fromEnv, saved].map((v) => String(v ?? "").trim().toLowerCase()).find((v) => OPEN_IN.includes(v)) ?? "auto";
   const inVsCode = String(termProgram ?? "").toLowerCase() === "vscode";
+  const missing = `the Crosstalk terminal helper isn't installed in ${label}`;
   if (wanted === "window") {
     return { where: "window" };
   }
   if (wanted === "vscode" && !hasHelper) {
-    return { where: "window", why: "the Crosstalk terminal helper isn't installed in VS Code" };
+    return { where: "window", why: missing };
   }
   if (wanted === "vscode" || (inVsCode && hasHelper)) {
     return { where: "vscode" };
   }
-  return { where: "window", why: inVsCode ? "the Crosstalk terminal helper isn't installed in VS Code" : "" };
+  return { where: "window", why: inVsCode ? missing : "" };
 }
 
 export const HELPER_ID = "svumo.crosstalk-terminal";
 
 // Which VS Code build this session runs in. VSCodium sets TERM_PROGRAM=vscode too, so it is told
-// apart by the path of its own executable in VSCODE_GIT_ASKPASS_NODE. CLAUDE_CROSSTALK_EDITOR
-// (code or codium) wins. Returns the command line, the link scheme and the name to show.
+// apart by the path of its own executable in VSCODE_GIT_ASKPASS_NODE, which every VS Code-family
+// terminal sets. CLAUDE_CROSSTALK_EDITOR wins, then the saved `/crosstalk editor` setting; `auto`
+// (or nothing) means spot it. Returns the command line, the link scheme, the name to show and how
+// it was chosen.
 export const EDITORS = {
   code: { cli: "code", scheme: "vscode", label: "VS Code" },
   codium: { cli: "codium", scheme: "vscodium", label: "VSCodium" },
 };
-export function editorFor(fromEnv, askpassNode) {
-  const wanted = String(fromEnv ?? "").trim().toLowerCase();
-  if (wanted === "codium" || wanted === "vscodium") {
-    return EDITORS.codium;
+export const EDITOR_CHOICES = ["auto", "code", "codium"];
+const EDITOR_WORDS = { code: "code", vscode: "code", codium: "codium", vscodium: "codium" };
+export function editorFor(fromEnv, saved, askpassNode) {
+  const env = EDITOR_WORDS[String(fromEnv ?? "").trim().toLowerCase()];
+  if (env) {
+    return { ...EDITORS[env], how: "CLAUDE_CROSSTALK_EDITOR" };
   }
-  if (wanted === "code" || wanted === "vscode") {
-    return EDITORS.code;
+  const kept = EDITOR_WORDS[String(saved ?? "").trim().toLowerCase()];
+  if (kept) {
+    return { ...EDITORS[kept], how: "saved" };
   }
-  return /codium/i.test(String(askpassNode ?? "")) ? EDITORS.codium : EDITORS.code;
+  return { ...(/codium/i.test(String(askpassNode ?? "")) ? EDITORS.codium : EDITORS.code), how: "spotted" };
+}
+
+// The command that installs the helper in that editor, from the plugin's own folder.
+export function helperInstall(editor, pluginRoot) {
+  const folder = String(pluginRoot ?? "").trim() || "<the plugin's folder>";
+  return `${editor.cli} --install-extension "${folder.replace(/[\\/]+$/, "")}/vscode/crosstalk-terminal-0.3.0.vsix"`;
 }
 
 // The link the VS Code helper answers. The ask travels as base64url JSON, so any folder name,

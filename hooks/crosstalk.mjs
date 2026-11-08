@@ -17,7 +17,7 @@ import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
   chooseOpenIn, findOpened, HELPER_ID, isSafeLaunch, launchFor, OPEN_IN, PERMISSION_MODES, trustProject,
-  vscodeLink, editorFor, windowArgv, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
+  vscodeLink, editorFor, EDITOR_CHOICES, helperInstall, windowArgv, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
   LINUX_TERMINALS,
 } from "./core.mjs";
 import {
@@ -194,6 +194,9 @@ export function register(on) {
     }
     if (word === "open-in") {
       return { text: await openInCommand($, String(words[1] ?? "").toLowerCase()) };
+    }
+    if (word === "editor") {
+      return { text: await editorCommand($, String(words[1] ?? "").toLowerCase()) };
     }
     if (word === "launch") {
       return { text: await launchCommand($, String(words[1] ?? "").toLowerCase(), words.slice(2).join(" ")) };
@@ -530,18 +533,67 @@ async function hasHelper($, pc, editor) {
   return Boolean(listed && listed.exitCode === 0 && listed.stdout.toLowerCase().split(/\r?\n/).map((l) => l.trim()).includes(HELPER_ID));
 }
 
+// Where `open` would put a new session from this one, and why: the editor (spotted from this
+// session's terminal, or set), whether its helper is installed, and the choice that follows.
+async function resolveOpening($, pc, setup) {
+  const fromEnv = await $.env.get("CLAUDE_CROSSTALK_OPEN_IN");
+  const termProgram = await $.env.get("TERM_PROGRAM");
+  const editor = editorFor(await $.env.get("CLAUDE_CROSSTALK_EDITOR"), setup.editor, await $.env.get("VSCODE_GIT_ASKPASS_NODE"));
+  const wanted = String(fromEnv || setup.openIn || "auto").toLowerCase();
+  const helper = wanted === "window" ? false : await hasHelper($, pc, editor);
+  const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper, editor.label);
+  const inEditor = String(termProgram ?? "").toLowerCase() === "vscode";
+  return { fromEnv, editor, helper, choice, inEditor };
+}
+
+// One line that says what `open` will do from here, and how to change it.
+function describeOpening(r, pluginRoot) {
+  const where = r.choice.where === "vscode" ? `a ${r.editor.label} terminal tab` : "a new terminal window";
+  const how = { CLAUDE_CROSSTALK_EDITOR: "set by CLAUDE_CROSSTALK_EDITOR", saved: "set by /crosstalk editor", spotted: r.inEditor ? "spotted from this session's terminal" : "the default, as this session isn't in an editor terminal" }[r.editor.how];
+  const lines = [`From this session, open starts ${where}.`, `Editor: ${r.editor.label} (${how}). Helper: ${r.helper ? "installed" : "not found"}.`];
+  if (r.choice.why) {
+    lines.push(`Why a window: ${r.choice.why}.`);
+  }
+  if (!r.helper && (r.inEditor || r.choice.why)) {
+    lines.push(`Install the helper: ${helperInstall(r.editor, pluginRoot)}, then reload the ${r.editor.label} window.`);
+  }
+  return lines.join("\n");
+}
+
 async function openInCommand($, value) {
   const setup = await readJson($, `${root}/setup.json`, {});
   if (value === "") {
     const fromEnv = await $.env.get("CLAUDE_CROSSTALK_OPEN_IN");
-    return `New sessions open in: ${setup.openIn ?? "auto"}${fromEnv ? ` (CLAUDE_CROSSTALK_OPEN_IN=${fromEnv} wins)` : ""}. Choices: ${OPEN_IN.join(", ")}.`;
+    const now = describeOpening(await resolveOpening($, await computer($), setup), $.plugin.root);
+    return `New sessions open in: ${setup.openIn ?? "auto"}${fromEnv ? ` (CLAUDE_CROSSTALK_OPEN_IN=${fromEnv} wins)` : ""}. Choices: ${OPEN_IN.join(", ")}.\n${now}`;
   }
   if (!OPEN_IN.includes(value)) {
-    return `Usage: /crosstalk open-in ${OPEN_IN.join("|")}. auto is VS Code when this session runs there, else a new terminal window.`;
+    return `Usage: /crosstalk open-in ${OPEN_IN.join("|")}. auto is an editor tab (VS Code or VSCodium) when this session runs in one, else a new terminal window.`;
   }
   setup.openIn = value;
   await saveSetup($, setup);
   return `New sessions open in: ${value}.`;
+}
+
+// Which editor the tab opens in: auto spots VS Code or VSCodium from this session's terminal.
+async function editorCommand($, value) {
+  const setup = await readJson($, `${root}/setup.json`, {});
+  const fromEnv = await $.env.get("CLAUDE_CROSSTALK_EDITOR");
+  const wins = fromEnv ? ` (CLAUDE_CROSSTALK_EDITOR=${fromEnv} wins)` : "";
+  if (value === "") {
+    return `Editor: ${setup.editor ?? "auto"}${wins}. Choices: ${EDITOR_CHOICES.join(", ")}. auto spots VS Code or VSCodium from the terminal this session runs in.`;
+  }
+  const word = { vscode: "code", vscodium: "codium" }[value] ?? value;
+  if (!EDITOR_CHOICES.includes(word)) {
+    return `Usage: /crosstalk editor ${EDITOR_CHOICES.join("|")}. auto spots VS Code or VSCodium from the terminal this session runs in.`;
+  }
+  if (word === "auto") {
+    delete setup.editor;
+  } else {
+    setup.editor = word;
+  }
+  await saveSetup($, setup);
+  return `Editor: ${word}${wins}.`;
 }
 
 async function launchCommand($, profile, command) {
@@ -633,12 +685,7 @@ async function openSession($, profile, message, opts = {}) {
   }
   const pc = await computer($);
   const isTrusted = await trustFolder($, pc, setup, profile).catch(() => false);
-  const fromEnv = await $.env.get("CLAUDE_CROSSTALK_OPEN_IN");
-  const termProgram = await $.env.get("TERM_PROGRAM");
-  const editor = editorFor(await $.env.get("CLAUDE_CROSSTALK_EDITOR"), await $.env.get("VSCODE_GIT_ASKPASS_NODE"));
-  const wanted = String(fromEnv || setup.openIn || "auto").toLowerCase();
-  const helper = wanted === "window" ? false : await hasHelper($, pc, editor);
-  const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper);
+  const { editor, choice } = await resolveOpening($, pc, setup);
   const since = await $.clock.now();
   let ran = null;
   let place = "a new terminal window";
@@ -757,7 +804,7 @@ async function startUp($) {
     },
     isDeferred: false,
   });
-  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. open <profile> [--model m] [--mode p] [message] starts one; open-in and launch set how; setup connects profiles; add <name> makes one; off and on pause it." });
+  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. open <profile> [--model m] [--mode p] [message] starts one; open-in, editor and launch set how (open-in alone shows what it will do); setup connects profiles; add <name> makes one; off and on pause it." });
   $.clock.every(BEAT_MS, () => beat($).catch(() => {}));
   $.clock.every(POLL_MS, () => poll($).catch(() => {}));
   void prune($);

@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import {
   addressOf, frameMessages, isLive, LIVE_MS, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, SHOW_TEXT, showMessages, toolResultCount, toolUseCount,
-  chooseOpenIn, editorFor, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
+  chooseOpenIn, editorFor, EDITORS, helperInstall, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
   linuxArgv, linuxCandidates, macArgv, parseOpenArgs, shQuote, userShell, whichArgv,
 } from '../hooks/core.mjs'
 import {
@@ -537,11 +537,16 @@ test('open runs the VS Code link, then hands the new session its first message',
 })
 
 test('VSCodium is told apart from VS Code, and the variable wins', () => {
-  expect(editorFor(undefined, 'C:\\Program Files\\VSCodium\\VSCodium.exe')).toEqual({ cli: 'codium', scheme: 'vscodium', label: 'VSCodium' })
-  expect(editorFor(undefined, 'C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe').cli).toBe('code')
-  expect(editorFor(undefined, undefined).cli).toBe('code')
-  expect(editorFor('codium', undefined).cli).toBe('codium')
-  expect(editorFor('code', 'C:\\Program Files\\VSCodium\\VSCodium.exe').cli).toBe('code')
+  const codium = 'C:\\Program Files\\VSCodium\\VSCodium.exe'
+  expect(editorFor(undefined, undefined, codium)).toEqual({ cli: 'codium', scheme: 'vscodium', label: 'VSCodium', how: 'spotted' })
+  expect(editorFor(undefined, undefined, 'C:\\Users\\me\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe').cli).toBe('code')
+  expect(editorFor(undefined, undefined, undefined).cli).toBe('code')
+  expect(editorFor('codium', undefined, undefined)).toMatchObject({ cli: 'codium', how: 'CLAUDE_CROSSTALK_EDITOR' })
+  expect(editorFor('code', 'codium', codium)).toMatchObject({ cli: 'code', how: 'CLAUDE_CROSSTALK_EDITOR' })
+  expect(editorFor(undefined, 'code', codium)).toMatchObject({ cli: 'code', how: 'saved' })
+  expect(editorFor('nonsense', 'auto', codium)).toMatchObject({ cli: 'codium', how: 'spotted' })
+  expect(chooseOpenIn(undefined, undefined, 'vscode', false, 'VSCodium').why).toBe("the Crosstalk terminal helper isn't installed in VSCodium")
+  expect(helperInstall(EDITORS.codium, 'C:\\plug\\crosstalk\\1.4.1\\')).toBe('codium --install-extension "C:\\plug\\crosstalk\\1.4.1/vscode/crosstalk-terminal-0.3.0.vsix"')
   expect(vscodeLink({ name: 'a', cwd: 'b', cmd: 'claude' }, 'vscodium')).toMatch(/^vscodium:\/\/svumo\.crosstalk-terminal\/open\?d=/)
 })
 
@@ -560,6 +565,33 @@ test('open in VSCodium uses codium and its own link', async ($, on) => {
   expect(open[0]).toBe('codium')
   expect(open[open.length - 1]).toMatch(/^vscodium:\/\//)
   expect(calls.some((a) => a[0] === 'code')).toBe(false)
+})
+
+test('open-in alone says what open will do from here, and editor changes it', async ($, on) => {
+  let listed = 'svumo.crosstalk-terminal\n'
+  const calls: any[] = []
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', TERM_PROGRAM: 'vscode', VSCODE_GIT_ASKPASS_NODE: 'C:\\Program Files\\VSCodium\\VSCodium.exe' }, (e: any) => {
+    calls.push(e.argv)
+    if (e.argv.includes('--list-extensions')) return { ...RAN_OK, stdout: listed }
+    return RAN_OK
+  })
+  await $.session.start(START)
+  let text = await say($, 'open-in')
+  expect(text).toMatch(/open starts a VSCodium terminal tab/)
+  expect(text).toMatch(/Editor: VSCodium \(spotted from this session's terminal\)\. Helper: installed/)
+  listed = 'aaron-bond.better-comments\n'
+  text = await say($, 'open-in')
+  expect(text).toMatch(/open starts a new terminal window/)
+  expect(text).toMatch(/helper isn't installed in VSCodium/)
+  expect(text).toMatch(/Install the helper: codium --install-extension ".*crosstalk-terminal-0\.3\.0\.vsix"/)
+  expect(await say($, 'editor sideways')).toMatch(/Usage: \/crosstalk editor auto\|code\|codium/)
+  expect(await say($, 'editor vscode')).toMatch(/Editor: code\./)
+  expect(await say($, 'editor')).toMatch(/Editor: code\. Choices/)
+  listed = 'svumo.crosstalk-terminal\n'
+  expect(await say($, 'open-in')).toMatch(/Editor: VS Code \(set by \/crosstalk editor\)/)
+  expect(calls[calls.length - 1][0]).toBe('code')
+  expect(await say($, 'editor auto')).toMatch(/Editor: auto\./)
+  expect(await say($, 'open-in')).toMatch(/Editor: VSCodium \(spotted/)
 })
 
 test('open-in window opens a terminal window, and the setting is kept', async ($, on) => {

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.1
+
+- `open` works in VSCodium. Each session spots its editor from the terminal it runs in: VSCodium's terminal gets the new session as a VSCodium tab, through `codium` and a `vscodium://` link, and VS Code's as before. Install the helper in VSCodium with `codium --install-extension <the plugin's folder>/vscode/crosstalk-terminal-0.3.0.vsix`.
+- `/crosstalk editor auto|code|codium` pins the editor, and `CLAUDE_CROSSTALK_EDITOR` overrides that.
+- `/crosstalk open-in` on its own now says what `open` will do from this session and why: which editor it spotted, whether the helper is installed, and the install command with the real folder when it isn't.
+- Messages name the editor they mean, so a missing helper in VSCodium says VSCodium.
+
 ## 1.4.0
 
 - `/crosstalk open <profile> --model <m> --mode <p> [message]`: the slash command can set the new session's model and permission mode too. Modes are matched whatever their case.
