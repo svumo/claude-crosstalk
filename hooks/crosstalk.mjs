@@ -540,21 +540,22 @@ async function resolveOpening($, pc, setup) {
   const termProgram = await $.env.get("TERM_PROGRAM");
   const editor = editorFor(await $.env.get("CLAUDE_CROSSTALK_EDITOR"), setup.editor, await $.env.get("VSCODE_GIT_ASKPASS_NODE"));
   const wanted = String(fromEnv || setup.openIn || "auto").toLowerCase();
-  const helper = wanted === "window" ? false : await hasHelper($, pc, editor);
+  const checked = wanted !== "window";
+  const helper = checked ? await hasHelper($, pc, editor) : false;
   const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper, editor.label);
   const inEditor = String(termProgram ?? "").toLowerCase() === "vscode";
-  return { fromEnv, editor, helper, choice, inEditor };
+  return { fromEnv, editor, helper, checked, choice, inEditor };
 }
 
 // One line that says what `open` will do from here, and how to change it.
 function describeOpening(r, pluginRoot) {
   const where = r.choice.where === "vscode" ? `a ${r.editor.label} terminal tab` : "a new terminal window";
   const how = { CLAUDE_CROSSTALK_EDITOR: "set by CLAUDE_CROSSTALK_EDITOR", saved: "set by /crosstalk editor", spotted: r.inEditor ? "spotted from this session's terminal" : "the default, as this session isn't in an editor terminal" }[r.editor.how];
-  const lines = [`From this session, open starts ${where}.`, `Editor: ${r.editor.label} (${how}). Helper: ${r.helper ? "installed" : "not found"}.`];
+  const lines = [`From this session, open starts ${where}.`, `Editor: ${r.editor.label} (${how}). Helper: ${!r.checked ? "not checked, as open-in is window" : r.helper ? "installed" : "not found"}.`];
   if (r.choice.why) {
     lines.push(`Why a window: ${r.choice.why}.`);
   }
-  if (!r.helper && (r.inEditor || r.choice.why)) {
+  if (r.checked && !r.helper && (r.inEditor || r.choice.why)) {
     lines.push(`Install the helper: ${helperInstall(r.editor, pluginRoot)}, then reload the ${r.editor.label} window.`);
   }
   return lines.join("\n");

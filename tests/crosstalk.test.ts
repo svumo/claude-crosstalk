@@ -601,7 +601,10 @@ test('open-in window opens a terminal window, and the setting is kept', async ($
   await $.session.start(START)
   expect(await say($, 'open-in sideways')).toMatch(/Usage/)
   expect(await say($, 'open-in window')).toMatch(/open in: window/)
-  expect(await say($, 'open-in')).toMatch(/open in: window/)
+  const status = await say($, 'open-in')
+  expect(status).toMatch(/open in: window/)
+  expect(status).toMatch(/Helper: not checked, as open-in is window/)
+  expect(status).not.toMatch(/Install the helper/)
   const opened = await say($, 'open zai')
   expect(opened).toMatch(/new terminal window/)
   expect(opened).toMatch(/may stop at the folder-trust screen/) // no zai profile to mark
