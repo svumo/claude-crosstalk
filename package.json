@@ -9,7 +9,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",
-    "test:sidecar": "node --test \"tests/sidecar/*.test.ts\"",
+    "test:sidecar": "node --test \"tests/sidecar/*.spec.ts\"",
     "test:plugin": "claude plugin test .",
     "validate": "claude plugin validate ."
   },
