@@ -44,23 +44,34 @@ function pathsOf(call: Bag, rawInput: Bag): string[] {
   return [...new Set(found)];
 }
 
-function toolEvent(update: Bag): BackendEvent {
+export type ToolEvent = Extract<BackendEvent, { type: "tool" }>;
+
+// A tool call as it stands now. A `tool_call_update` names only what changed (often just the
+// status), so whatever it leaves out is kept from what `known` holds for that call.
+function toolEvent(update: Bag, known: Map<string, ToolEvent>): ToolEvent {
+  const id = text(update.toolCallId);
+  const before = known.get(id);
   const rawInput = bag(update.rawInput);
-  const command = commandOf(rawInput);
-  return {
+  const command = commandOf(rawInput) ?? before?.command;
+  const paths = pathsOf(update, rawInput);
+  const diffs = diffsOf(update.content);
+  const event: ToolEvent = {
     type: "tool",
-    id: text(update.toolCallId),
-    kind: toolKind(update.kind),
-    title: text(update.title),
-    status: STATUS[text(update.status)] ?? "pending",
+    id,
+    kind: update.kind === undefined && before ? before.kind : toolKind(update.kind),
+    title: text(update.title) || (before?.title ?? ""),
+    status: STATUS[text(update.status)] ?? before?.status ?? "pending",
     ...(command === undefined ? {} : { command }),
-    paths: pathsOf(update, rawInput),
-    diffs: diffsOf(update.content),
+    paths: paths.length > 0 ? paths : (before?.paths ?? []),
+    diffs: diffs.length > 0 ? diffs : (before?.diffs ?? []),
   };
+  known.set(id, event);
+  return event;
 }
 
 // One `session/update` notification as an event, or null for the kinds the sidecar does not show.
-export function eventOf(params: unknown): BackendEvent | null {
+// `known` is the session's tool calls so far, which this keeps up to date.
+export function eventOf(params: unknown, known: Map<string, ToolEvent>): BackendEvent | null {
   const update = bag(bag(params).update);
   switch (update.sessionUpdate) {
     case "agent_message_chunk":
@@ -69,7 +80,7 @@ export function eventOf(params: unknown): BackendEvent | null {
       return { type: "thought", text: text(bag(update.content).text) };
     case "tool_call":
     case "tool_call_update":
-      return toolEvent(update);
+      return toolEvent(update, known);
     case "plan":
       return { type: "plan", entries: list(update.entries).map((e) => text(bag(e).content)).filter(Boolean) };
     default:

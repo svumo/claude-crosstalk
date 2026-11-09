@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 
 import { askOf, eventOf, outcomeFor, turnOf } from "./acp-map.ts";
+import type { ToolEvent } from "./acp-map.ts";
 import { BackendGone } from "./adapter.ts";
 import type { BackendInfo, CopilotBackend, StartOptions, TurnHandlers, TurnResult } from "./adapter.ts";
 import { JsonRpcPeer, RpcError } from "./jsonrpc.ts";
@@ -30,6 +31,7 @@ export class AcpBackend implements CopilotBackend {
   private sessionId = "";
   private turn: TurnHandlers | null = null;
   private isGone = false;
+  private readonly tools = new Map<string, ToolEvent>();
 
   constructor(command: string[]) {
     this.command = command;
@@ -126,7 +128,7 @@ export class AcpBackend implements CopilotBackend {
     if (method !== "session/update") {
       return;
     }
-    const event = eventOf(params);
+    const event = eventOf(params, this.tools);
     if (event) {
       this.turn?.onEvent(event);
     }
