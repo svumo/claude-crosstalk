@@ -16,7 +16,7 @@
 import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
-  chooseOpenIn, DESKTOP_ENTRYPOINT, findOpened, HELPER_ID, isSafeLaunch, launchFor, NOT_IN_APP, OPEN_IN, PERMISSION_MODES, trustProject,
+  appPanelCommand, chooseOpenIn, DESKTOP_ENTRYPOINT, findOpened, HELPER_ID, isSafeLaunch, launchFor, NOT_IN_APP, OPEN_IN, PERMISSION_MODES, trustProject,
   vscodeLink, editorFor, EDITOR_CHOICES, helperInstall, windowArgv, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
   LINUX_TERMINALS, appDataFolders, appTitle, HOST_SESSION, labelOf, listLine, projectFolderName, transcriptTitle,
 } from "./core.mjs";
@@ -707,7 +707,7 @@ async function openSession($, profile, message, opts = {}) {
   let ran = null;
   let place = "a new terminal window";
   if (choice.where === "app") {
-    const opened = await openInApp($, profile, command);
+    const opened = await openInApp($, profile, appPanelCommand(command, pc.isWindows));
     if (opened.error) {
       return { error: opened.error };
     }

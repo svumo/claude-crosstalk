@@ -5,7 +5,7 @@ import {
   pendingNames, profileName, resolveTarget, SHOW_TEXT, showMessages, toolResultCount, toolUseCount,
   chooseOpenIn, editorFor, EDITORS, helperInstall, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
   linuxArgv, linuxCandidates, macArgv, parseOpenArgs, shQuote, userShell, whichArgv,
-  appDataFolders, appTitle, cleanTitle, labelOf, listLine, projectFolderName, transcriptTitle,
+  appDataFolders, appPanelCommand, appTitle, cleanTitle, labelOf, listLine, projectFolderName, transcriptTitle,
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -657,7 +657,7 @@ test('from the desktop app, open types the launch command into a new Terminal pa
   expect(status).toMatch(/new tab in the Claude desktop app's Terminal panel/)
   const ok: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'mikey', model: 'sonnet' } as never)
   expect(JSON.stringify(ok)).toMatch(/Opening mikey \(claude mikey --model sonnet\) in a new tab of the app's Terminal panel/)
-  expect(typed.at(-1)).toMatchObject({ command: 'claude mikey --model sonnet', cwd: 'C:\\code\\proj', title: 'claude mikey' })
+  expect(typed.at(-1)).toMatchObject({ command: "$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1'; claude mikey --model sonnet", cwd: 'C:\\code\\proj', title: 'claude mikey' })
   expect(calls.some((a) => a[0] === 'wt' || a.includes('--list-extensions'))).toBe(false) // no window, no editor check
   refuse = 'The user declined'
   expect(await say($, 'open mikey hi')).toMatch(/Terminal panel didn't run it: The user declined\. \/crosstalk open-in window/)
@@ -906,4 +906,9 @@ test('a message from a titled session shows the title with the address', async (
   const m = { from: 'fuuk/x-1', fromTitle: 'Claude Fuuk for next task', sentAt: NOW, text: 'done', name: 'a.json' }
   expect(frameMessages([m])).toMatch(/From Claude Fuuk for next task \(fuuk\/x-1\), sent/)
   expect(showMessages([m])).toMatch(/^Crosstalk ← Claude Fuuk for next task \(fuuk\/x-1\) · /)
+})
+
+test('a Terminal panel tab keeps its transcript: the app marker is overridden, in the shell the tab runs', async () => {
+  expect(appPanelCommand('claude mikey', true)).toBe("$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1'; claude mikey")
+  expect(appPanelCommand('claude-work --model opus', false)).toBe('export CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1; claude-work --model opus')
 })

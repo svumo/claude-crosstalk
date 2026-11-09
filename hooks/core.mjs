@@ -325,6 +325,16 @@ export function trustProject(jsonText, cwd) {
   return JSON.stringify({ ...data, projects: { ...projects, [key]: { ...entry, hasTrustDialogAccepted: true } } }, null, 2);
 }
 
+// The line typed into a tab of the desktop app's Terminal panel. That shell inherits the app's
+// CLAUDE_CODE_CHILD_SESSION marker, and a Claude Code that sees it saves no transcript, so the
+// session couldn't be resumed and would get no title. Claude Code's own way round that is
+// CLAUDE_CODE_FORCE_SESSION_PERSISTENCE. PowerShell syntax on Windows, sh-family elsewhere.
+export function appPanelCommand(command, isWindows) {
+  return isWindows
+    ? `$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1'; ${command}`
+    : `export CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1; ${command}`;
+}
+
 export const OPEN_IN = ["auto", "app", "vscode", "window"];
 
 // The Claude desktop app sets this on the Claude Code sessions it runs.

@@ -6,6 +6,7 @@ Crosstalk now works properly with the **Claude desktop app**, as well as in term
 
 **Sessions on another account, from the app**
 - From a session in the desktop app, `/crosstalk open <profile>` starts that profile in a new tab of the app's **Terminal panel**, so it runs inside the app on that profile's own login and subscription. There's nothing to install: Crosstalk uses the app's own Terminal tool, and the app asks you to approve the command. `auto` picks this whenever the session runs in the app. `/crosstalk open-in app` sets it, and `/crosstalk open-in window` goes back to a separate terminal window.
+- A session opened this way keeps its transcript, so it can be resumed and gets a title. The panel's shell inherits a marker from the app that otherwise turns transcript saving off, so Crosstalk sets `CLAUDE_CODE_FORCE_SESSION_PERSISTENCE` on the line it types.
 - A session opened this way is found even when its shell reports the folder at the app's packaged path (`AppData\Local\Packages\…\LocalCache\Roaming`), so your first message still reaches it.
 
 **A full app window per account (Windows, optional)**
