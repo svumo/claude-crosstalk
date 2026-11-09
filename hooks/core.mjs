@@ -499,7 +499,7 @@ export function toastLink(window, hostId) {
 }
 
 export function parseToastLink(url) {
-  const m = /^crosstalk-window:\/\/open\?window=([A-Za-z0-9][A-Za-z0-9_-]{0,30})&session=(local_[A-Za-z0-9-]{1,64})\/?$/.exec(String(url ?? "").trim());
+  const m = /^crosstalk-window:\/\/open\/?\?window=([A-Za-z0-9][A-Za-z0-9_-]{0,30})&session=(local_[A-Za-z0-9-]{1,64})\/?$/.exec(String(url ?? "").trim());
   return m ? { window: m[1].toLowerCase(), session: m[2] } : null;
 }
 

@@ -1228,6 +1228,8 @@ test('a profile is told as people say it, and a notification link only takes pla
     .toEqual(['fuuk', 'fuuk', 'fuuk', 'fuuk', 'work', 'default', 'default'])
   const link = toastLink('fuuk', 'local_ab-12')
   expect(parseToastLink(link)).toEqual({ window: 'fuuk', session: 'local_ab-12' })
+  // Windows hands the handler the link with a slash after the host.
+  expect(parseToastLink('crosstalk-window://open/?window=fuuk&session=local_ab-12')).toEqual({ window: 'fuuk', session: 'local_ab-12' })
   expect(parseToastLink('crosstalk-window://open?window=../x&session=local_1')).toBe(null)
   expect(parseToastLink('crosstalk-window://open?window=fuuk&session=local_1&q=calc')).toBe(null)
   expect(parseToastLink('claude://code/new?folder=x')).toBe(null)
