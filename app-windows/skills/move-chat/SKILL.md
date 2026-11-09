@@ -1,42 +1,56 @@
 ---
 name: move-chat
-description: Move the current conversation to another Claude account's window (fuuk, mikey, or back to default/main) so the work carries on there on that account's usage. Compacts this chat into a handoff, opens a session on that account pointed at it, presses Send, and checks it picked up. Use when the user says "move this to fuuk", "carry on on fuuk", "resume on <account>", "hand this chat over", or a usage limit is close.
-argument-hint: "<profile: fuuk | mikey | default>  [what the next session should focus on]"
+description: Move the current conversation to another Claude account's desktop app window (any Crosstalk profile, or default for the main window) so the work carries on there on that account's usage. Writes a handoff, opens a session on that account pointed at it, presses Send, and checks it started. Use when the user says "move this to <account>", "carry on on <account>", "resume on <account>", "hand this chat over", or a usage limit is close.
+argument-hint: "<profile, or default>  [what the next session should focus on]"
 ---
 
 Moves this chat to another account. Keep every step short: the point is to save tokens.
 
+The scripts live in Crosstalk's shared folder: `$env:CLAUDE_CROSSTALK_DIR\app-windows`, or `~\.claude-crosstalk\app-windows` when that variable isn't set. Below, `<xt>` means that shared folder.
+
 ## 1. Write the handoff
 
-Follow the `handoff` skill's rules for content (3-line TL;DR first, half-finished and unverified items listed, reference files/commits by path instead of copying them, redact secrets, a "Suggested skills" section), with these changes:
+Save it to `<xt>\handoffs\YYYY-MM-DD-HHMM-<what-was-done>.md`, where every profile can read it. A project rule that says where handoffs go wins.
 
-- Save to `~/claude-shared/handoffs/YYYY-MM-DD-HHMM-<what-was-done>.md` (every profile can read it). Project rules that say where handoffs go still win.
-- Keep it under ~120 lines. Include: the goal in the user's words, decisions made (and who made them), what is done and verified, what is left in order, exact paths, commands that worked, gotchas found, and the user's working preferences that came up in this chat.
-- Add a "Where this came from" section: this session's crosstalk address (run crosstalk `list` right before writing; the first line says "You are …", and names change when a session is renamed), the folder, and the full transcript path: `<config dir>\projects\<folder slug>\<session id>.jsonl` (main account `~\.claude`, others `~\.claude-<profile>`; find it with `ls -t <config dir>/projects/*/*.jsonl | head`). Mark it "grep for a detail, never read whole".
-- Commit finished, verified work first if the project commits as it goes.
+Keep it under about 120 lines:
+
+- **TL;DR**: 2 to 3 lines, first.
+- **Goal**, in the user's own words.
+- **Decisions** made, and who made them.
+- **Done and verified**, and separately anything half-finished or not verified.
+- **Left, in order.**
+- **Exact paths**, the commands that worked, and the gotchas found.
+- **The user's working preferences** that came up in this chat.
+- **Where this came from**:
+  - This session's Crosstalk address. Run crosstalk `list` right before writing: its first line says "You are …".
+  - The folder.
+  - The full transcript path: `<config dir>\projects\<folder slug>\<session id>.jsonl`. The config dir is `~\.claude` for the main account and `~\.claude-<profile>` for others. Find it with `ls -t <config dir>/projects/*/*.jsonl | head`. Mark it "grep for a detail, never read whole".
+- **Suggested skills** for the next session.
+
+Point to files and commits by path instead of copying them in. Leave secrets out. If the project commits as it goes, commit finished, verified work first.
 
 ## 2. Open the session on the other account
 
-Pick the folder: the project's main checkout (not a worktree of this session, unless the work lives only on that worktree's branch: then name the branch in the handoff and use the main checkout).
+Pick the folder: the project's main checkout, so the app files the session under the same project in its sidebar. Use a worktree of this session only if the work lives only on that worktree's branch. In that case, name the branch in the handoff and still use the main checkout.
 
-Run in PowerShell (one line):
+Run this in PowerShell, as one line:
 
 ```
-& "$env:USERPROFILE\claude-shared\claude-new-session.ps1" <profile> "<folder>" "Resume from a handoff: read <full handoff path> first, then carry on with its next steps. Message <this session's crosstalk address> over crosstalk only if you're blocked or when done." -Send
+& "<xt>\app-windows\claude-new-session.ps1" <profile> "<folder>" "Resume from a handoff: read <full handoff path> first, then carry on with its next steps. Message <this session's crosstalk address> over crosstalk only if you're blocked or when done." -Send
 ```
 
-- `<profile>` is `fuuk`, `mikey`, or `default` (the main window).
-- Never start the prompt with `/` (the app neutralises it; the script rewrites it to "Use the … skill").
-- The script presses "Trust workspace" for that folder if asked, then Send. If it prints "Gave up", run crosstalk `list` anyway (it may have sent) before retrying, and never send twice.
-- The other account's window must be open (`claude-app.ps1 <profile>`); if no window is found, start it and run the line again.
-- No app window wanted, or it keeps failing: use the crosstalk `open` tool instead (`profile`, `message` = the same resume prompt). That starts a terminal-tab session on that profile, already trusted.
+- `<profile>` is the Crosstalk profile name, or `default` for the main window.
+- Never start the prompt with `/`. The app disables a leading slash that comes by link, so the script rewrites it as "Use the … skill".
+- The script presses "Trust workspace" for that folder if the app asks, then presses Send. If it prints "Gave up", run crosstalk `list` first, because it may have sent anyway. Never send twice.
+- If it says no window is running, start one with `& "<xt>\app-windows\claude-app.ps1" <profile>` and run the line again.
+- If you don't need the app window, or it keeps failing, use the crosstalk `open` tool instead, with `profile` and `message` set to the same resume prompt. From the desktop app, that starts the profile in a tab of the app's Terminal panel. It isn't listed in that account's app sidebar.
 
-## 3. Check it picked up
+## 3. Check it started
 
-Run crosstalk `list` once: the new session shows as `<profile>/<title>-xxxx`. Don't poll. Its message arrives here on its own if it is blocked or done.
+Run crosstalk `list` once. The new session shows up by its title, with an address like `<profile>/<title>-xxxx`. Don't poll: its message arrives here by itself if it gets blocked or finishes.
 
 ## 4. Tell the user (3 lines)
 
-- The handoff path, and the new session's crosstalk name.
-- That this chat can be left or archived now; to come back, say "move this to default" (or the account) in the other chat.
+- The handoff path, and the new session's name in Crosstalk.
+- That this chat can be left or archived now. To come back, say "move this to default" (or this account's profile) in the other chat.
 - Anything not carried over or not verified.
