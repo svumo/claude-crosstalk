@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.7.0
+
+**Usage guard**
+- At 93% of any usage limit (5-hour, weekly, or a gateway's spend limit), every session on that account stops its turn, compacts, writes the summary to `handoffs/` in the shared folder, shows it, and asks whether to move to another account. It offers up to three other profiles, lowest usage first. Picking one opens it in the same folder, reading the handoff. The first session to see it tells the rest through `usage/<profile>.json`, so idle sessions stop too. Sessions over the limit hold their wake-ups until the window resets.
+- Big sessions can move earlier: a session whose context is 60% full stops at 85% (`/crosstalk usage large`), `/crosstalk usage here <n>` sets one session's own point, and `/crosstalk move <profile>` moves a session right away.
+- `/crosstalk usage` shows each account's last known usage and where this session stops, and `/crosstalk usage <n|off>` (or `CLAUDE_CROSSTALK_USAGE_STOP`) sets the account point.
+
+**Moved sessions work alone when the old one is out of usage**
+- A session moved because its account hit the limit is told it owns the work alone: it shouldn't message the old session, and should ask you in its own chat if it's blocked. A move with plenty of usage left keeps the old wording: report back only if blocked or when done.
+- `send` still delivers to a session that's paused for usage, but its reply says that session won't answer before its limit resets. `list` marks such sessions, and its first line now shows this session's own usage. The `move-chat` skill reads that line to choose the wording.
+
 ## 1.6.0
 
 Crosstalk now works properly with the **Claude desktop app**, as well as in terminals and VS Code. The [desktop app guide](docs/desktop-app.md) covers it.

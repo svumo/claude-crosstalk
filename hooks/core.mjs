@@ -474,3 +474,198 @@ export function findOpened(records, profile, cwd, since, now) {
     .filter((r) => r.profile === profile && isLive(r, now) && (r.startedAt ?? 0) >= since && folderKey(r.cwd) === folder)
     .sort((a, b) => b.startedAt - a.startedAt)[0] ?? null;
 }
+
+// Usage guard. A session stops, compacts and offers to move when a rate-limit window of its
+// account is nearly spent. These are the pure parts; crosstalk.mjs does the stopping.
+export const USAGE_STOP = 93;
+export const LARGE_STOP = 85;
+export const LARGE_CONTEXT = 60;
+// A flag with no reset time counts for five hours, the shortest window.
+export const FLAG_MS = 5 * 3600_000;
+export const WINDOW_NAMES = { five_hour: "5-hour limit", seven_day: "weekly limit", spend_limit: "spend limit" };
+
+export const windowName = (kind) => WINDOW_NAMES[kind] ?? String(kind ?? "limit");
+
+// The fullest window, or null off a subscription (no windows at all).
+export function worstWindow(rateLimits) {
+  const windows = (Array.isArray(rateLimits) ? rateLimits : []).filter((w) => w && Number.isFinite(w.percentUsed));
+  return windows.reduce((worst, w) => (!worst || w.percentUsed > worst.percentUsed ? w : worst), null);
+}
+
+// A threshold as typed: 1-100, or "off" (0). Anything else is null.
+export function parsePercent(word) {
+  const text = String(word ?? "").trim().toLowerCase().replace(/%$/, "");
+  if (text === "off") {
+    return 0;
+  }
+  const n = Number(text);
+  return Number.isInteger(n) && n >= 1 && n <= 100 ? n : null;
+}
+
+// Where this session stops, and why. `account` is the account-wide point (0 = off); `here` this
+// session's own; `large` { stop, context } for a session with a full context, or null.
+// why: "here" (set on this session), "large" (its context is full), "account", or "off".
+export function stopPoint({ account, here, large, contextPercent }) {
+  if (here > 0) {
+    return { percent: here, why: "here" };
+  }
+  const isLarge = large && large.stop > 0 && Number.isFinite(contextPercent) && contextPercent >= large.context;
+  if (isLarge && (!(account > 0) || large.stop < account)) {
+    return { percent: large.stop, why: "large" };
+  }
+  return account > 0 ? { percent: account, why: "account" } : { percent: 0, why: "off" };
+}
+
+// Whether a window is at or over the point.
+export const isOver = (window, percent) => Boolean(window) && percent > 0 && window.percentUsed >= percent;
+
+// When a flag stops counting: its window's reset, else five hours after it was written.
+export function flagEnds(flag) {
+  const reset = Date.parse(flag?.resetsAt ?? "");
+  return Number.isFinite(reset) ? reset : Number(flag?.at ?? 0) + FLAG_MS;
+}
+
+// A flag stops a session on the same profile, or on the same account when both know theirs.
+export function flagApplies(flag, me, now) {
+  if (!flag || typeof flag !== "object" || now >= flagEnds(flag)) {
+    return false;
+  }
+  return flag.profile === me.profile || Boolean(flag.account && me.account && flag.account === me.account);
+}
+
+// One key per window, so a session acts on a window once, and "Not now" holds until it resets.
+export const windowKey = (w) => `${w?.kind ?? "limit"}@${w?.resetsAt ?? ""}`;
+
+// Up to three other profiles to move to, lowest known usage first, those with no reading after.
+// A profile with a live flag is left out. `records` are session records (with usage), `launch`
+// the saved launch commands' profile names, `flags` the live flags.
+export function moveChoices(records, launch, me, flags, now) {
+  const tripped = new Set(flags.filter((f) => now < flagEnds(f)).map((f) => f.profile));
+  const known = new Map();
+  for (const r of records) {
+    if (!isLive(r, now) || !r.profile) {
+      continue;
+    }
+    const pct = Number.isFinite(r.usage?.percent) ? r.usage.percent : null;
+    const had = known.get(r.profile);
+    known.set(r.profile, had === undefined || had === null ? pct : pct === null ? had : Math.max(had, pct));
+  }
+  for (const p of launch) {
+    if (!known.has(p)) {
+      known.set(p, null);
+    }
+  }
+  return [...known.entries()]
+    .filter(([p]) => p !== me.profile && !tripped.has(p))
+    .map(([profile, percent]) => ({ profile, percent }))
+    .sort((a, b) => (a.percent ?? 101) - (b.percent ?? 101) || a.profile.localeCompare(b.profile))
+    .slice(0, 3);
+}
+
+export const choiceLabel = (c) => `${c.profile} (${c.percent === null ? "no reading" : `${Math.round(c.percent)}%`})`;
+export const NOT_NOW = "Not now";
+
+// The profile an answer names: a choice's label, or a profile typed under "Other". "" for none.
+export function chosenProfile(answer, choices) {
+  const text = String(answer ?? "").trim();
+  const picked = choices.find((c) => choiceLabel(c) === text);
+  if (picked) {
+    return picked.profile;
+  }
+  const word = text.toLowerCase().split(/[\s(]/)[0] ?? "";
+  return text === NOT_NOW || !/^[a-z0-9][a-z0-9_-]{0,30}$/.test(word) ? "" : word;
+}
+
+// The compacted summary: the first message's text after a compaction, "" when there is none.
+export function summaryOf(result) {
+  const first = result?.messages?.[0];
+  if (!first) {
+    return "";
+  }
+  if (typeof first.text === "string") {
+    return first.text.trim();
+  }
+  return Array.isArray(first.content) ? first.content.map((b) => b?.text ?? "").join("\n").trim() : "";
+}
+
+export const COMPACT_INSTRUCTIONS = "This session is being stopped near its account's usage limit, and another session (maybe on another account) will carry on from this summary alone. Make it a handoff: the goal in the user's words, decisions made and why, what is done and verified, what is left in order, and the exact files, paths, branches and commands that matter.";
+
+// The handoff file's name: date, time, then the address, safe for any file system.
+export function handoffName(now, address) {
+  const stamp = new Date(now).toISOString().slice(0, 16).replace("T", "-").replace(":", "");
+  return `${stamp}-${String(address).replace(/[^a-z0-9-]+/gi, "-").replace(/^-+|-+$/g, "")}.md`;
+}
+
+// Why a session stopped, in words: "93% of its 5-hour limit" or "moved by hand".
+export function stopReason(stop) {
+  return stop.window ? `${Math.round(stop.window.percentUsed)}% of its ${windowName(stop.window.kind)}` : "a move asked for by hand";
+}
+
+export function handoffText({ me, stop, summary, transcript, now }) {
+  const reset = stop.window?.resetsAt ? `, resets ${stop.window.resetsAt}` : "";
+  return [
+    `# Handoff: ${me.title || me.address}`,
+    "",
+    `Stopped by Crosstalk's usage guard at ${stopReason(stop)}${reset}, ${new Date(now).toISOString()}.`,
+    "",
+    `- Profile: ${me.profile}${me.account ? ` (account ${me.account})` : ""}`,
+    `- Session: ${me.address} (${me.id})`,
+    `- Folder: ${me.cwd}`,
+    `- Transcript (grep it for a detail, don't read it whole): ${transcript}`,
+    "",
+    "## Summary",
+    "",
+    summary || "Not compacted: the summary couldn't be made. Read the end of the transcript above for where it stood.",
+    "",
+  ].join("\n");
+}
+
+// The first message of a moved session. `alone` when the origin stopped near its limit: it is
+// paused and may have little usage left, so a report back could go unanswered or spend the rest.
+// Otherwise the origin is healthy and hears back only when the new one is blocked or done.
+export function resumePrompt(path, me, alone) {
+  const from = `It was moved from ${me.address} on the ${me.profile} profile, in ${me.cwd}`;
+  return alone
+    ? `Resume from a handoff: read ${path} first, then carry on with its next steps. ${from}, which Crosstalk stopped near its usage limit. You own this work alone: don't message ${me.address}, as it is paused; if you're blocked, ask the user in your own chat.`
+    : `Resume from a handoff: read ${path} first, then carry on with its next steps. ${from}. Message ${me.address} over crosstalk only if you're blocked or when done.`;
+}
+
+// Whether a session's own record says it is paused for usage: held by the guard, or a window at or
+// over the point it stops at. Such a session holds messages until its window resets.
+export function isPaused(record) {
+  const u = record?.usage;
+  return Boolean(u) && (u.isHeld === true || (u.stopAt > 0 && Number.isFinite(u.percent) && u.percent >= u.stopAt));
+}
+
+// What the send tool adds when the session it wrote to is paused for usage.
+export function pausedNote(record) {
+  const u = record.usage;
+  const reset = u.resetsAt ? ` until ${u.resetsAt}` : "";
+  return ` ${labelOf(record)} is paused near its usage limit (${Math.round(u.percent ?? 0)}% of its ${windowName(u.kind)}), so it holds the message${reset} and won't answer before then. If you need an answer now, ask the user in your own chat instead.`;
+}
+
+// This session's usage as list and /crosstalk usage say it: "at 94% of its 5-hour limit, over
+// its stop point (93%)". "" off a subscription, before the first reading.
+export function usagePhrase(usage) {
+  if (!usage || !Number.isFinite(usage.percent)) {
+    return "";
+  }
+  const at = `at ${Math.round(usage.percent)}% of its ${windowName(usage.kind)}`;
+  if (!(usage.stopAt > 0)) {
+    return at;
+  }
+  return isPaused({ usage }) ? `${at}, over its stop point (${usage.stopAt}%)` : `${at}, stops at ${usage.stopAt}%`;
+}
+
+// What /crosstalk usage says about this session's stop point.
+export function stopLine(point, contextPercent) {
+  if (point.why === "off") {
+    return "This session doesn't stop for usage (the guard is off).";
+  }
+  const why = {
+    here: "set on this session with /crosstalk usage here",
+    large: `as its context is ${Math.round(contextPercent)}% full`,
+    account: "the account-wide point",
+  }[point.why];
+  return `This session stops at ${point.percent}%, ${why}.`;
+}

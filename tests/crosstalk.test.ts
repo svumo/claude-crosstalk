@@ -6,6 +6,8 @@ import {
   chooseOpenIn, editorFor, EDITORS, helperInstall, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
   linuxArgv, linuxCandidates, macArgv, parseOpenArgs, shQuote, userShell, whichArgv,
   appDataFolders, appPanelCommand, appTitle, cleanTitle, labelOf, listLine, projectFolderName, transcriptTitle,
+  chosenProfile, choiceLabel, flagApplies, flagEnds, FLAG_MS, handoffName, isPaused, moveChoices, NOT_NOW, parsePercent, pausedNote,
+  resumePrompt, stopPoint, summaryOf, usagePhrase, worstWindow,
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -911,4 +913,226 @@ test('a message from a titled session shows the title with the address', async (
 test('a Terminal panel tab keeps its transcript: the app marker is overridden, in the shell the tab runs', async () => {
   expect(appPanelCommand('claude mikey', true)).toBe("$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1'; claude mikey")
   expect(appPanelCommand('claude-work --model opus', false)).toBe('export CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1; claude-work --model opus')
+})
+
+// ---- Usage guard ----
+
+test('the fullest window counts, and none off a subscription', async () => {
+  expect(worstWindow([{ kind: 'five_hour', percentUsed: 40 }, { kind: 'seven_day', percentUsed: 93.5 }])?.kind).toBe('seven_day')
+  expect(worstWindow([])).toBe(null)
+  expect(worstWindow(undefined)).toBe(null)
+})
+
+test("a stop point: this session's own first, then a large context's, then the account's", async () => {
+  const large = { stop: 85, context: 60 }
+  expect(stopPoint({ account: 93, here: 0, large, contextPercent: 30 })).toEqual({ percent: 93, why: 'account' })
+  expect(stopPoint({ account: 93, here: 0, large, contextPercent: 60 })).toEqual({ percent: 85, why: 'large' })
+  expect(stopPoint({ account: 93, here: 80, large, contextPercent: 70 })).toEqual({ percent: 80, why: 'here' })
+  expect(stopPoint({ account: 80, here: 0, large, contextPercent: 70 })).toEqual({ percent: 80, why: 'account' }) // never later than the account
+  expect(stopPoint({ account: 93, here: 0, large: null, contextPercent: 99 })).toEqual({ percent: 93, why: 'account' })
+  expect(stopPoint({ account: 0, here: 0, large: null, contextPercent: 10 })).toEqual({ percent: 0, why: 'off' })
+  expect(parsePercent('85%')).toBe(85)
+  expect(parsePercent('off')).toBe(0)
+  expect(parsePercent('0')).toBe(null)
+  expect(parsePercent('101')).toBe(null)
+})
+
+test('a flag stops sessions on its profile or account, until its window resets', async () => {
+  const flag = { profile: 'work', account: 'acct-1', kind: 'five_hour', percent: 93, resetsAt: new Date(NOW + 1000).toISOString(), at: NOW }
+  expect(flagApplies(flag, { profile: 'work' }, NOW)).toBe(true)
+  expect(flagApplies(flag, { profile: 'renamed', account: 'acct-1' }, NOW)).toBe(true)
+  expect(flagApplies(flag, { profile: 'mikey', account: 'acct-2' }, NOW)).toBe(false)
+  expect(flagApplies(flag, { profile: 'work' }, NOW + 1000)).toBe(false)
+  expect(flagEnds({ at: NOW })).toBe(NOW + FLAG_MS)
+})
+
+test('the move picker: other profiles, lowest usage first, tripped ones and this one left out', async () => {
+  const r = (id: string, profile: string, percent?: number) => ({ ...rec(id, profile, `${profile}/x-${id}`), usage: percent === undefined ? undefined : { percent } })
+  const records = [r('a', 'work', 95), r('b', 'mikey', 40), r('c', 'mikey', 12), r('d', 'zai', 5), r('e', 'fuuk')]
+  const flags = [{ profile: 'zai', at: NOW }]
+  const choices = moveChoices(records, ['glm', 'mikey'], { profile: 'work' }, flags, NOW)
+  expect(choices).toEqual([{ profile: 'mikey', percent: 40 }, { profile: 'fuuk', percent: null }, { profile: 'glm', percent: null }])
+  expect(choiceLabel(choices[0])).toBe('mikey (40%)')
+  expect(choiceLabel(choices[1])).toBe('fuuk (no reading)')
+  expect(chosenProfile('mikey (40%)', choices)).toBe('mikey')
+  expect(chosenProfile('Personal', choices)).toBe('personal') // typed under Other
+  expect(chosenProfile(NOT_NOW, choices)).toBe('')
+})
+
+test('the summary is the first message after a compaction, and nothing when it was skipped', async () => {
+  expect(summaryOf({ messages: [{ role: 'user', text: ' the plan ', toolUses: [] }] })).toBe('the plan')
+  expect(summaryOf({ skip: 'vetoed' })).toBe('')
+  expect(handoffName(Date.UTC(2026, 10, 9, 15, 31), 'work/fix-the-login-ab12')).toBe('2026-11-09-1531-work-fix-the-login-ab12.md')
+})
+
+test('a moved session works alone when the origin stopped near its limit, else reports back when done', async () => {
+  const me = { address: 'work/fix-ab12', profile: 'work', cwd: 'C:\\code\\proj' }
+  const alone = resumePrompt('C:/h/x.md', me, true)
+  expect(alone).toMatch(/^Resume from a handoff: read C:\/h\/x\.md first/)
+  expect(alone).toMatch(/You own this work alone: don't message work\/fix-ab12/)
+  expect(alone).toMatch(/ask the user in your own chat/)
+  expect(alone).not.toMatch(/only if you're blocked or when done/)
+  const healthy = resumePrompt('C:/h/x.md', me, false)
+  expect(healthy).toMatch(/Message work\/fix-ab12 over crosstalk only if you're blocked or when done\./)
+  expect(healthy).not.toMatch(/alone/)
+})
+
+test('a session is paused when its guard holds it or its window is past its stop point', async () => {
+  expect(isPaused({ usage: { percent: 94, stopAt: 93 } })).toBe(true)
+  expect(isPaused({ usage: { percent: 50, stopAt: 93, isHeld: true } })).toBe(true)
+  expect(isPaused({ usage: { percent: 50, stopAt: 93 } })).toBe(false)
+  expect(isPaused({ usage: { percent: 99, stopAt: 0 } })).toBe(false) // guard off
+  expect(isPaused({})).toBe(false)
+  expect(usagePhrase({ kind: 'five_hour', percent: 94, stopAt: 93 })).toBe('at 94% of its 5-hour limit, over its stop point (93%)')
+  expect(usagePhrase({ kind: 'seven_day', percent: 20, stopAt: 93 })).toBe('at 20% of its weekly limit, stops at 93%')
+  expect(usagePhrase(undefined)).toBe('')
+  expect(pausedNote({ ...rec('o', 'work', 'work/o-1'), usage: { kind: 'five_hour', percent: 95, stopAt: 93 } })).toMatch(/paused near its usage limit .*ask the user in your own chat/)
+})
+
+// The engine side: a fake disk, a compaction, a question and a terminal, as the person would see them.
+const RESET = '2026-11-09T20:00:00.000Z'
+const until = async (check: () => boolean) => {
+  for (let i = 0; i < 100 && !check(); i += 1) await settle()
+  return check()
+}
+const measure = ($: any, percentUsed: number, contextPercent = 30) =>
+  $.session.measure({ context: { window: 200_000, percent: contextPercent }, rateLimits: [{ kind: 'five_hour', percentUsed, resetsAt: RESET }], changed: ['rateLimits'] })
+
+function guardWorld(on: any, answer = 'mikey (12%)') {
+  const ran: any[] = []
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work' }, (e: any) => { ran.push(e.argv); return RAN_OK })
+  const w: any = { files, ran, aborted: [] as string[], compacted: [] as any[], asked: [] as any[] }
+  on('clock.sleep', () => ({ value: undefined }))
+  on('session.measure', (_: any, e: any) => ({ changed: e.changed }))
+  on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
+  on('turn.abort', (_: any, e: any) => { w.aborted.push(e.turnId); return { value: undefined } })
+  on('session.compact', (_: any, e: any) => { w.compacted.push(e); return { messages: [{ role: 'user', text: 'SUMMARY: fix the login, tests left', toolUses: [] }] } })
+  on('ui.notify', () => ({ value: { isSent: true, channel: 'terminal_bell' } }))
+  on('tool.call', { tool: 'AskUserQuestion' }, (_: any, e: any) => {
+    w.asked.push(e)
+    const q = e.questions?.[0]?.question
+    return { result: { questions: e.questions, answers: { [q]: answer } } }
+  })
+  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey' } }))
+  // mikey is running at 12%, and a mikey session in this folder shows up once opened.
+  files.set(`${BOX}/sessions/m1.json`, JSON.stringify({ id: 'm1', profile: 'mikey', address: 'mikey/x-m1', cwd: 'C:\\elsewhere', seenAt: NOW, startedAt: 1, usage: { kind: 'five_hour', percent: 12, stopAt: 93 } }))
+  w.openedNew = () => files.set(`${BOX}/sessions/new-1.json`, JSON.stringify({ id: 'new-1', profile: 'mikey', address: 'mikey/proj-new', cwd: 'C:\\code\\proj', seenAt: NOW, startedAt: NOW }))
+  w.handoff = () => [...files.keys()].find((k: string) => k.startsWith(`${BOX}/handoffs/`))
+  w.resume = () => {
+    const k = [...files.keys()].find((x: string) => x.startsWith(`${BOX}/inbox/new-1/`))
+    return k ? JSON.parse(files.get(k)).text : ''
+  }
+  return w
+}
+
+test('at 93% a session flags its account, stops its turn, compacts, writes a handoff, asks, and opens the pick', async ($, on) => {
+  const w = guardWorld(on)
+  await $.session.start(START)
+  w.openedNew()
+  await $.turn.start({ turnId: 't1' } as never)
+  await measure($, 93)
+  expect(await until(() => w.resume() !== '')).toBe(true)
+  const flag = JSON.parse(w.files.get(`${BOX}/usage/work.json`))
+  expect(flag).toMatchObject({ profile: 'work', kind: 'five_hour', percent: 93, resetsAt: RESET, by: 'work/proj-self' })
+  expect(w.aborted).toEqual(['t1'])
+  expect(w.compacted[0].instructions).toMatch(/handoff/)
+  const handoff = w.files.get(w.handoff())
+  expect(handoff).toMatch(/93% of its 5-hour limit/)
+  expect(handoff).toMatch(/SUMMARY: fix the login/)
+  expect(handoff).toMatch(/projects\/C--code-proj\/self-1\.jsonl/)
+  expect(JSON.stringify(w.asked[0])).toMatch(/work is at 93% of its 5-hour limit\. Move this session to another account\?/)
+  expect(JSON.stringify(w.asked[0])).toMatch(/mikey \(12%\).*Not now/)
+  expect(w.ran.some((argv: string[]) => argv.join(' ').includes('claude mikey'))).toBe(true)
+  expect(w.resume()).toMatch(/You own this work alone: don't message work\/proj-self/)
+  expect(w.files.logs.some((l: string) => /stopped and compacted\. Handoff: [^\n]*\n\nSUMMARY/.test(l))).toBe(true)
+  expect(isPaused(JSON.parse(w.files.get(`${BOX}/sessions/self-1.json`)))).toBe(true)
+})
+
+test('another session on the same profile stops from the flag alone; Not now leaves it here, held', async ($, on) => {
+  const w = guardWorld(on, NOT_NOW)
+  const submitted: string[] = []
+  on('prompt.submit', (_: any, e: any) => { submitted.push(e.text); return { text: e.text, origin: e.origin } })
+  w.files.set(`${BOX}/usage/work.json`, JSON.stringify({ profile: 'work', kind: 'five_hour', percent: 94, resetsAt: RESET, at: NOW, by: 'work/other-1' }))
+  await $.session.start(START)
+  w.files.set(`${BOX}/inbox/self-1/${messageFileName(NOW, 'a')}`, JSON.stringify({ from: 'zai/x-oth', sentAt: NOW, text: 'wake up' }))
+  w.files.tick()
+  expect(await until(() => w.files.logs.some((l: string) => /left here/.test(l)))).toBe(true)
+  expect(w.compacted.length).toBe(1)
+  expect(w.files.get(w.handoff())).toMatch(/94% of its 5-hour limit/)
+  expect(submitted.length).toBe(0) // the message waits: no wake-ups while held
+  expect(w.ran.some((argv: string[]) => argv.join(' ').includes('claude mikey'))).toBe(false)
+})
+
+test('a flag for another profile leaves this session alone', async ($, on) => {
+  const w = guardWorld(on)
+  w.files.set(`${BOX}/usage/mikey.json`, JSON.stringify({ profile: 'mikey', kind: 'five_hour', percent: 95, resetsAt: RESET, at: NOW }))
+  await $.session.start(START)
+  w.files.tick()
+  await settle()
+  await settle()
+  expect(w.compacted.length).toBe(0)
+  expect(w.handoff()).toBe(undefined)
+})
+
+test('a session set to stop early stops alone, flags nothing, and keeps the point in its record', async ($, on) => {
+  const w = guardWorld(on, NOT_NOW)
+  await $.session.start(START)
+  expect(await say($, 'usage here 80')).toMatch(/stops at 80%/)
+  await measure($, 79)
+  await settle()
+  expect(w.compacted.length).toBe(0)
+  await measure($, 80)
+  expect(await until(() => w.compacted.length === 1)).toBe(true)
+  expect(w.files.has(`${BOX}/usage/work.json`)).toBe(false)
+  expect(JSON.parse(w.files.get(`${BOX}/sessions/self-1.json`)).guard.here).toBe(80)
+})
+
+test('a large context stops at 85% by default, and usage large changes it', async ($, on) => {
+  const w = guardWorld(on, NOT_NOW)
+  await $.session.start(START)
+  await measure($, 84, 72)
+  await settle()
+  expect(w.compacted.length).toBe(0)
+  expect(await say($, 'usage')).toMatch(/This session stops at 85%, as its context is 72% full\./)
+  await measure($, 85, 72)
+  expect(await until(() => w.compacted.length === 1)).toBe(true)
+  expect(w.files.has(`${BOX}/usage/work.json`)).toBe(false)
+  expect(await say($, 'usage large 75 50')).toMatch(/50% full or more stops at 75%/)
+  expect(JSON.parse(w.files.get(`${BOX}/setup.json`)).usageLarge).toEqual({ stop: 75, context: 50 })
+})
+
+test('usage sets the account point, and off turns the guard off', async ($, on) => {
+  const w = guardWorld(on)
+  await $.session.start(START)
+  expect(await say($, 'usage 90')).toMatch(/stops at 90%/)
+  expect(JSON.parse(w.files.get(`${BOX}/setup.json`)).usageStop).toBe(90)
+  expect(await say($, 'usage off')).toMatch(/guard is off/)
+  await measure($, 99)
+  await settle()
+  expect(w.compacted.length).toBe(0)
+  expect(await say($, 'usage nonsense')).toMatch(/^Usage:/)
+})
+
+test('move hands a healthy session over at once, and the new one reports back only when blocked or done', async ($, on) => {
+  const w = guardWorld(on)
+  await $.session.start(START)
+  w.openedNew()
+  await measure($, 20)
+  expect(await say($, 'move mikey')).toMatch(/Moving this session to mikey/)
+  expect(await until(() => w.resume() !== '')).toBe(true)
+  expect(w.asked.length).toBe(0)
+  expect(w.compacted.length).toBe(1)
+  expect(w.resume()).toMatch(/Message work\/proj-self over crosstalk only if you're blocked or when done\./)
+  expect(await say($, 'move work')).toMatch(/already on work/)
+})
+
+test('sending to a session paused for usage still delivers, and says it will not answer yet', async ($, on) => {
+  const w = guardWorld(on)
+  await $.session.start(START)
+  w.files.set(`${BOX}/sessions/p1.json`, JSON.stringify({ id: 'p1', profile: 'fuuk', address: 'fuuk/x-p1', cwd: 'y', seenAt: NOW, usage: { kind: 'five_hour', percent: 95, resetsAt: RESET, stopAt: 93, isHeld: true } }))
+  const sent: any = await $.tool.call({ tool: 'mcp__crosstalk__send', to: 'fuuk', text: 'done' } as never)
+  expect(JSON.stringify(sent)).toMatch(/Sent to fuuk\/x-p1\. fuuk\/x-p1 is paused near its usage limit/)
+  expect([...w.files.keys()].some((k: string) => k.startsWith(`${BOX}/inbox/p1/`))).toBe(true)
+  const listed: any = await $.tool.call({ tool: 'mcp__crosstalk__list' } as never)
+  expect(JSON.stringify(listed)).toMatch(/fuuk\/x-p1[^"]*\(paused near its usage limit\)/)
 })
