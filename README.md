@@ -206,6 +206,8 @@ claude
 
 </details>
 
+**A desktop app window per account (Windows).** [`app-windows/`](app-windows/README.md) has scripts that run a second copy of the Claude desktop app for another account, start and send sessions in it from any other session, and a `move-chat` skill that moves a whole chat to another account through a handoff file.
+
 ## What it works with
 
 **Any AI provider you can point Claude Code at.** Claude Code speaks Anthropic's API format, so that means anything with an Anthropic-compatible endpoint, or any other model through a translating gateway such as LiteLLM. The model has to support tool calls, because that's how a session sends a message.
