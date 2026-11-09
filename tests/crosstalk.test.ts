@@ -8,6 +8,7 @@ import {
   appDataFolders, appPanelCommand, appTitle, cleanTitle, labelOf, listLine, projectFolderName, transcriptTitle,
   chosenProfile, choiceLabel, flagApplies, flagEnds, FLAG_MS, handoffName, isPaused, moveChoices, NOT_NOW, parsePercent, pausedNote,
   resumePrompt, stopPoint, summaryOf, usagePhrase, worstWindow,
+  appWindowOf, chooseOpenProfile, hostWindow, parseParents, windowNote, profileWord,
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -119,7 +120,7 @@ function fakeDisk(on: any, env: Record<string, string> = { USERPROFILE: 'C:\\hom
   const files: any = new Map<string, string>()
   on('env.get', (_: any, e: any) => ({ value: env[e.name] }))
   on('session.id', () => ({ value: 'self-1' }))
-  on('session.cwd', () => ({ value: 'C:\\code\\proj' }))
+  on('session.cwd', () => ({ value: env.TEST_CWD ?? 'C:\\code\\proj' }))
   on('tool.register', (_: any, e: any) => ({ value: { tool: `mcp__crosstalk__${e.name}` } }))
   on('command.register', (_: any, e: any) => ({ value: { command: e.name } }))
   on('fs.write', (_: any, e: any) => { files.set(slash(e.path), e.text); return { value: undefined } })
@@ -471,13 +472,13 @@ test('a permission mode is matched whatever its case', async () => {
 })
 
 test('/crosstalk open reads --model and --mode after the profile, and the rest is the message', async () => {
-  expect(parseOpenArgs(['Mikey', '--model', 'sonnet', '--mode=plan', 'say', 'hi'])).toEqual({ profile: 'mikey', model: 'sonnet', permissionMode: 'plan', message: 'say hi' })
-  expect(parseOpenArgs(['zai', '--permission-mode', 'auto'])).toEqual({ profile: 'zai', model: '', permissionMode: 'auto', message: '' })
-  expect(parseOpenArgs(['zai', 'use', '--model', 'x'])).toEqual({ profile: 'zai', model: '', permissionMode: '', message: 'use --model x' })
+  expect(parseOpenArgs(['Mikey', '--model', 'sonnet', '--mode=plan', 'say', 'hi'])).toEqual({ profile: 'mikey', model: 'sonnet', permissionMode: 'plan', openIn: '', message: 'say hi' })
+  expect(parseOpenArgs(['zai', '--permission-mode', 'auto'])).toEqual({ profile: 'zai', model: '', permissionMode: 'auto', openIn: '', message: '' })
+  expect(parseOpenArgs(['zai', 'use', '--model', 'x'])).toEqual({ profile: 'zai', model: '', permissionMode: '', openIn: '', message: 'use --model x' })
   expect(parseOpenArgs(['zai', '--fast']).error).toMatch(/Unknown option --fast/)
   expect(parseOpenArgs(['zai', '--model']).error).toMatch(/needs a value/)
   expect(parseOpenArgs(['zai', '--mode=']).error).toMatch(/needs a value/)
-  expect(parseOpenArgs([])).toEqual({ profile: '', model: '', permissionMode: '', message: '' })
+  expect(parseOpenArgs([])).toEqual({ profile: '', model: '', permissionMode: '', openIn: '', message: '' })
 })
 
 test('on macOS a Terminal window opens in the folder, however the folder is named', async () => {
@@ -655,6 +656,7 @@ test('from the desktop app, open types the launch command into a new Terminal pa
   on('clock.sleep', () => ({ value: undefined }))
   files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey' } }))
   await $.session.start(START)
+  await say($, 'open-in panel')
   const status = await say($, 'open-in')
   expect(status).toMatch(/new tab in the Claude desktop app's Terminal panel/)
   const ok: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'mikey', model: 'sonnet' } as never)
@@ -1135,4 +1137,198 @@ test('sending to a session paused for usage still delivers, and says it will not
   expect([...w.files.keys()].some((k: string) => k.startsWith(`${BOX}/inbox/p1/`))).toBe(true)
   const listed: any = await $.tool.call({ tool: 'mcp__crosstalk__list' } as never)
   expect(JSON.stringify(listed)).toMatch(/fuuk\/x-p1[^"]*\(paused near its usage limit\)/)
+})
+
+// Which app window a session runs in, and which profile `open` picks from it.
+const STORE = 'C:\\Program Files\\WindowsApps\\Claude_4.23118.0.0_x64__pzs8sxrjxfjjc\\app\\claude.exe'
+// A mikey session in a Terminal-panel tab of the fuuk window, as the parent walk prints it.
+const IN_FUUK = [
+  'C:\\WINDOWS\\System32\\cmd.exe\tcmd.exe /d /s /c "pwsh"',
+  'C:\\Users\\me\\.local\\bin\\claude.exe\t"C:\\Users\\me\\.local\\bin\\claude.exe" mikey',
+  'C:\\Program Files\\PowerShell\\7\\pwsh.exe\t"pwsh.exe" -NoProfile -NoExit -Command x',
+  `${STORE.replace('claude.exe', 'Claude.exe')}\t"${STORE}" --type=utility --utility-sub-type=node.mojom.NodeService`,
+  `${STORE}\t"${STORE}" --user-data-dir="C:\\Users\\me\\.claude-fuuk-app" "claude://code/new?folder=C%3A%5Cx"`,
+  'C:\\WINDOWS\\explorer.exe\tC:\\WINDOWS\\Explorer.EXE',
+].join('\r\n')
+
+test('an app window is told from its process: the main window, a profile window, and what is not one', async () => {
+  expect(appWindowOf(STORE, `"${STORE}"`)).toBe('default')
+  expect(appWindowOf(STORE, `"${STORE}" --user-data-dir="C:\\Users\\me\\.claude-fuuk-app" "claude://x"`)).toBe('fuuk')
+  expect(appWindowOf(STORE, `${STORE} --user-data-dir=C:\\Users\\me\\.claude-Work-app`)).toBe('work')
+  expect(appWindowOf('C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.2.3\\claude.exe', 'claude.exe')).toBe('default')
+  expect(appWindowOf(STORE, `"${STORE}" --type=renderer --user-data-dir="C:\\Users\\me\\.claude-fuuk-app"`)).toBe('')
+  expect(appWindowOf('C:\\Users\\me\\.local\\bin\\claude.exe', 'claude.exe')).toBe('') // the CLI
+  expect(appWindowOf('C:\\Users\\me\\.claude-fuuk-app\\claude-code\\2.1\\claude.exe', 'claude.exe')).toBe('') // the app's copy for sessions
+})
+
+test('a session is in the nearest app window above it, and in none outside the app', async () => {
+  expect(parseParents(IN_FUUK)).toHaveLength(6)
+  expect(hostWindow(parseParents(IN_FUUK))).toBe('fuuk')
+  expect(hostWindow(parseParents(IN_FUUK.split('\r\n').slice(0, 3).join('\n')))).toBe('')
+  expect(hostWindow([])).toBe('')
+  expect(windowNote({ window: 'fuuk' })).toBe(', in the fuuk app window')
+  expect(windowNote({})).toBe('')
+  expect(listLine({ address: 'mikey/x-1', cwd: 'C:\\p', window: 'fuuk' })).toBe('mikey/x-1 (folder C:\\p, in the fuuk app window)')
+})
+
+test('open with no profile stays on this session\'s own, a named one wins, and "window" uses the window\'s', async () => {
+  expect(chooseOpenProfile('', 'fuuk', 'fuuk')).toEqual({ profile: 'fuuk', why: "this session's own profile, as none was named", note: '' })
+  expect(chooseOpenProfile(undefined, 'mikey', '').profile).toBe('mikey')
+  expect(chooseOpenProfile(' Here ', 'mikey', '').profile).toBe('mikey')
+  const tab = chooseOpenProfile('', 'mikey', 'fuuk')
+  expect(tab.profile).toBe('mikey')
+  expect(tab.note).toMatch(/tab of the fuuk app window: open fuuk \(or "window"\)/)
+  expect(chooseOpenProfile('Default', 'mikey', 'fuuk')).toEqual({ profile: 'default', why: '', note: '' })
+  expect(chooseOpenProfile('window', 'mikey', 'fuuk').profile).toBe('fuuk')
+  expect(chooseOpenProfile('window', 'mikey', '').error).toMatch(/can't tell which Claude app window/)
+  expect(parseOpenArgs(['--model', 'sonnet', 'hi'])).toEqual({ profile: '', model: 'sonnet', permissionMode: '', openIn: '', message: 'hi' })
+})
+
+test('from a tab of another account\'s window, open picks this session\'s profile unless one is named', async ($, on) => {
+  const typed: any[] = []
+  const walks: any[] = []
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-mikey', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }, (e: any) => {
+    if (e.argv[0] === 'powershell.exe') { walks.push(e.argv); return { ...RAN_OK, stdout: IN_FUUK } }
+    return RAN_OK
+  })
+  on('tool.call', { tool: 'mcp__terminal__run_in_terminal' }, (_: any, e: any) => { typed.push(e); return { result: [{ type: 'text', text: 'Started' }] } })
+  on('clock.sleep', () => ({ value: undefined }))
+  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey', fuuk: 'claude fuuk' } }))
+  await $.session.start(START)
+  await say($, 'open-in panel')
+  const listed: any = await $.tool.call({ tool: 'mcp__crosstalk__list' } as never)
+  expect(JSON.stringify(listed)).toMatch(/You are mikey\/proj-self, in the fuuk app window\./)
+  expect(walks).toHaveLength(1)
+  expect(walks[0].at(-1)).not.toMatch(/"/) // no double quotes to survive Windows quoting
+  const unnamed: any = await $.tool.call({ tool: 'mcp__crosstalk__open', message: 'hi' } as never)
+  expect(JSON.stringify(unnamed)).toMatch(/Opening mikey \(claude mikey\) in a new tab of the fuuk app window's Terminal panel\. mikey is this session's own profile, as none was named\. This session runs in a tab of the fuuk app window/)
+  expect(typed.at(-1).command).toMatch(/; claude mikey$/)
+  const named: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'fuuk' } as never)
+  expect(JSON.stringify(named)).toMatch(/Opening fuuk \(claude fuuk\)/)
+  expect(JSON.stringify(named)).not.toMatch(/none was named/)
+  expect(await say($, 'open window')).toMatch(/Opening fuuk \(claude fuuk\).*fuuk is the account of the fuuk app window this session runs in/)
+  expect(typed.map((t) => t.command.split('; ').at(-1))).toEqual(['claude mikey', 'claude fuuk', 'claude fuuk'])
+  expect(JSON.parse(files.get(`${BOX}/sessions/self-1.json`)!).window).toBe('fuuk')
+})
+
+test('outside the app no process walk runs, and "window" says it can\'t tell', async ($, on) => {
+  const calls: any[] = []
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', CLAUDE_CROSSTALK_OPEN_IN: 'window' }, (e: any) => { calls.push(e.argv); return RAN_OK })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open window')).toMatch(/can't tell which Claude app window/)
+  expect(await say($, 'open')).toMatch(/Opening work \(claude-work\) in a new terminal window\. work is this session's own profile/)
+  expect(calls.some((a) => a[0] === 'powershell.exe')).toBe(false)
+})
+
+// ---- Open where you are, shorter commands, notifications that open their own window ----
+
+test('a profile is told as people say it, and open takes --in', async () => {
+  expect(['fuuk', 'claude-fuuk', 'claude fuuk', 'the fuuk app', 'my Work account', 'claude', 'main'].map(profileWord))
+    .toEqual(['fuuk', 'fuuk', 'fuuk', 'fuuk', 'work', 'default', 'default'])
+  expect(parseOpenArgs(['claude', 'fuuk', '--in', 'window', 'hi'])).toMatchObject({ profile: 'claude-fuuk', openIn: 'window', message: 'hi' })
+  expect(parseOpenArgs(['fuuk', '--in', 'nowhere']).error).toMatch(/--in takes/)
+  expect(chooseOpenIn('panel', undefined, '', false, 'VS Code', true)).toEqual({ where: 'panel' })
+  expect(chooseOpenIn('editor', undefined, 'vscode', true)).toEqual({ where: 'vscode' })
+})
+
+// A mikey session in the app, with fuuk's app window on disk and the plugin's scripts in place.
+function inAppWindows(on: any, extraEnv: Record<string, string> = {}, hasHost = false) {
+  const calls: any[] = []
+  const typed: any[] = []
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-mikey', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', ...extraEnv }, (e: any) => {
+    calls.push(e.argv)
+    if (e.argv[0] === 'powershell.exe' && e.argv.includes('-Command')) return { ...RAN_OK, stdout: IN_FUUK }
+    return RAN_OK
+  })
+  if (hasHost) files.set(`${BOX}/app-windows/ToastHost.exe`, '')
+  on('tool.call', { tool: 'mcp__terminal__run_in_terminal' }, (_: any, e: any) => { typed.push(e); return { result: [{ type: 'text', text: 'Started' }] } })
+  on('clock.sleep', () => ({ value: undefined }))
+  files.set('C:/home/.claude-fuuk-app/Preferences', '{}')
+  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey', fuuk: 'claude fuuk' } }))
+  return { calls, typed, files }
+}
+
+test('from the app on Windows, open starts the session in the named profile\'s own app window', async ($, on) => {
+  const { calls, typed, files } = inAppWindows(on)
+  await $.session.start(START)
+  const opened: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'claude fuuk', message: 'review the diff' } as never)
+  expect(JSON.stringify(opened)).toMatch(/Opened fuuk in fuuk's Claude app window\. Its first message was sent/)
+  const run = calls.find((a) => a.includes('-File') && /claude-new-session\.ps1$/.test(a[a.indexOf('-File') + 1]))!
+  expect(run.slice(run.indexOf('-File') + 2, run.indexOf('-File') + 4)).toEqual(['fuuk', 'C:\\code\\proj'])
+  expect(run).toContain('-Send')
+  const promptFile = run[run.indexOf('-PromptFile') + 1]
+  expect(files.get(slash(promptFile))).toMatch(/^\[Crosstalk\] .*opened this session\. It says:\n\nreview the diff$/)
+  expect(typed).toHaveLength(0) // not the Terminal panel
+  expect(calls.some((a) => a[0] === 'wt')).toBe(false) // not a window of the terminal
+  // The main window needs no folder of its own; with no message nothing is sent.
+  const main: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'default' } as never)
+  expect(JSON.stringify(main)).toMatch(/Opened default in the main Claude app window\..*nothing was sent/)
+  expect(calls.filter((a) => a.includes('-Send'))).toHaveLength(1)
+})
+
+test('a spare session opens in its project folder, from the app file, not its temporary one', async ($, on) => {
+  const SPARE = 'C:\\home\\.claude-work\\spares\\spare-AbC123'
+  const calls: any[] = []
+  const files: any = fakeDisk(on, { ...APP_ENV, CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', TEST_CWD: SPARE }, (e: any) => { calls.push(e.argv); return RAN_OK })
+  on('clock.sleep', () => ({ value: undefined }))
+  files.set('C:/home/.claude-fuuk-app/Preferences', '{}')
+  const appPath = `${APP}/claude-code-sessions/acct/org/local_abc-1.json`
+  files.set(appPath, JSON.stringify({ sessionId: 'local_abc-1', cliSessionId: 'self-1', title: 'Spare', cwd: 'C:\\code\\real', originCwd: 'C:\\code\\real' }))
+  await $.session.start({ ...START, cwd: SPARE })
+  expect(JSON.stringify(await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'fuuk', message: 'hi' } as never))).toMatch(/Opened fuuk in fuuk's Claude app window/)
+  const run = calls.find((a) => a.some((x: string) => /claude-new-session\.ps1$/.test(x)))!
+  expect(run[run.indexOf('fuuk') + 1]).toBe('C:\\code\\real')
+  // Without a project folder on record, it says so instead of handing the app a folder that is gone.
+  files.set(appPath, JSON.stringify({ sessionId: 'local_abc-1', cliSessionId: 'self-1', title: 'Spare', cwd: SPARE }))
+  expect(JSON.stringify(await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'fuuk', message: 'hi' } as never))).toMatch(/temporary folder the app made/)
+})
+
+test('a profile with no app window yet is said, not guessed at, and --in panel still works', async ($, on) => {
+  const { typed } = inAppWindows(on)
+  await $.session.start(START)
+  const missing = await say($, 'open zai hello')
+  expect(missing).toMatch(/zai has no Claude app window on this computer yet.*--in panel/)
+  expect(await say($, 'open zai --in panel hello')).toMatch(/Opening zai \(claude-zai\) in a new tab of the .*Terminal panel/)
+  expect(typed).toHaveLength(1)
+})
+
+test('a profile\'s name works as a command, and to sends without the model', async ($, on) => {
+  const { calls, files } = inAppWindows(on)
+  await $.session.start(START)
+  files.set(`${BOX}/sessions/other.json`, JSON.stringify({ id: 'other', profile: 'fuuk', address: 'fuuk/x-oth', cwd: 'y', seenAt: NOW }))
+  expect(await say($, 'fuuk look at the build')).toMatch(/Opened fuuk in fuuk's Claude app window/)
+  expect(calls.some((a) => a.includes('-PromptFile'))).toBe(true)
+  expect(await say($, 'to fuuk check the build')).toMatch(/^Sent to fuuk\/x-oth/)
+  expect([...files.keys()].some((k: string) => k.startsWith(`${BOX}/inbox/other/`))).toBe(true)
+  expect(await say($, 'to')).toMatch(/^Usage: \/crosstalk to/)
+  expect(await say($, 'help')).toMatch(/\/crosstalk where/)
+  expect(await say($, '')).toMatch(/\/crosstalk <profile> \[message\]/)
+})
+
+test('a session in an account window raises a notification that opens that window, once the helper is built', async ($, on) => {
+  const { calls } = inAppWindows(on, { CLAUDE_CODE_HOST_SESSION_ID: 'local_abc-123' }, true)
+  on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: 'done' }))
+  await $.session.start(START)
+  await settle()
+  await $.turn.start({ turnId: 't1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'done' } as never)
+  await settle()
+  const toast = calls.find((a) => a.includes('-File') && /claude-toast\.ps1$/.test(a[a.indexOf('-File') + 1]))!
+  expect(toast.slice(toast.indexOf('-File') + 2, toast.indexOf('-File') + 4)).toEqual(['fuuk', 'local_abc-123'])
+  expect(toast.at(-1)).toBe('fuuk: finished')
+  expect(toast[toast.indexOf('-File') + 1]).toBe(`C:/home/.claude-crosstalk/app-windows/claude-toast.ps1`) // the built copy, not the plugin's
+})
+
+test('no notification until the helper is built', async ($, on) => {
+  const first = inAppWindows(on, { CLAUDE_CODE_HOST_SESSION_ID: 'local_abc-123' })
+  on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: 'done' }))
+  await $.session.start(START)
+  await settle()
+  await $.turn.start({ turnId: 't1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'done' } as never)
+  await settle()
+  expect(first.calls.some((a) => a.some((x: string) => /claude-toast\.ps1$/.test(x)))).toBe(false)
 })

@@ -1,8 +1,15 @@
 ---
 name: move-chat
-description: Move the current conversation to another Claude account's desktop app window (any Crosstalk profile, or default for the main window) so the work carries on there on that account's usage. Writes a handoff, opens a session on that account pointed at it, presses Send, and checks it started. Use when the user says "move this to <account>", "carry on on <account>", "resume on <account>", "hand this chat over", or a usage limit is close.
-argument-hint: "<profile, or default>  [what the next session should focus on]"
+description: Move the current conversation to another Claude account's desktop app window (any Crosstalk profile, or default for the main window), or to a fresh session in the window the user is in, so the work carries on there. Writes a handoff, opens a session pointed at it, presses Send, and checks it started. Use when the user says "move this to <account>", "carry on on <account>", "resume on <account>", "hand this chat over", "use a different session", or a usage limit is close.
+argument-hint: "[profile, default, or here]  [what the next session should focus on]"
 ---
+
+## Which window
+
+- The user named an account ("move this to work"): use that profile. A named account always wins.
+- The user named none ("use a different session", "start a new chat for this"): use `here`. The script then picks the app window this session runs in, which is the one the user is looking at. A Terminal-panel tab counts as the window it is a tab of, so a mikey session in a tab of the fuuk window gets the fuuk window. Outside the app it picks this session's own profile's window.
+- The reason is a usage limit and no account was named: `here` would land on the same account, so ask which account to use. Don't guess one.
+- To check without opening anything, add `-DryRun`. It prints the window it would use and why.
 
 Moves this chat to another account. Keep every step short: the point is to save tokens.
 
@@ -29,7 +36,7 @@ Keep it under about 120 lines:
 
 Point to files and commits by path instead of copying them in. Leave secrets out. If the project commits as it goes, commit finished, verified work first.
 
-## 2. Open the session on the other account
+## 2. Open the session
 
 Pick the folder: the project's main checkout, so the app files the session under the same project in its sidebar. Use a worktree of this session only if the work lives only on that worktree's branch. In that case, name the branch in the handoff and still use the main checkout.
 
@@ -44,11 +51,11 @@ Run this in PowerShell, as one line:
 & "<xt>\app-windows\claude-new-session.ps1" <profile> "<folder>" "Resume from a handoff: read <full handoff path> first, then carry on with its next steps. <report line>" -Send
 ```
 
-- `<profile>` is the Crosstalk profile name, or `default` for the main window.
+- `<profile>` is the Crosstalk profile name, `default` for the main window, or `here` (see "Which window"). With `here` the script prints the window it chose; tell the user.
 - Never start the prompt with `/`. The app disables a leading slash that comes by link, so the script rewrites it as "Use the … skill".
 - The script presses "Trust workspace" for that folder if the app asks, then presses Send. If it prints "Gave up", run crosstalk `list` first, because it may have sent anyway. Never send twice.
 - If it says no window is running, start one with `& "<xt>\app-windows\claude-app.ps1" <profile>` and run the line again.
-- If you don't need the app window, or it keeps failing, use the crosstalk `open` tool instead, with `profile` and `message` set to the same resume prompt. From the desktop app, that starts the profile in a tab of the app's Terminal panel. It isn't listed in that account's app sidebar.
+- If you don't need the app window, or it keeps failing, use the crosstalk `open` tool instead, with `message` set to the same resume prompt and `profile` set to the named account (leave it out for this session's own; `"window"` for the account of the window it runs in). From the desktop app, that starts the profile in a tab of the app's Terminal panel. It isn't listed in that account's app sidebar.
 
 ## 3. Check it started
 

@@ -16,7 +16,7 @@ The full guide (sign-in, starting sessions, `move-chat`, limits, troubleshooting
 |---|---|
 | `install.ps1` | Copies the scripts to `~\.claude-crosstalk\app-windows\`, puts the skill in every profile, and makes Start-menu shortcuts |
 | `claude-app.ps1` | Starts a profile's window, or brings it up |
-| `claude-new-session.ps1` | Opens a session in a profile's window with the folder and prompt filled in, and with `-Send` sends it |
+| `claude-new-session.ps1` | Opens a session in a profile's window (or `here`, the window you're in) with the folder and prompt filled in, and with `-Send` sends it. `-DryRun` says which window it would use |
 | `claude-press-send.ps1` | Presses Send in a profile's window through UI Automation |
 | `claude-common.ps1` | Shared helpers: finds the app and a profile's window |
 | `skills/move-chat/` | The skill that moves a chat to another account |

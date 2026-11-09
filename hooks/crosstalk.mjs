@@ -21,6 +21,7 @@ import {
   LINUX_TERMINALS, appDataFolders, appTitle, HOST_SESSION, labelOf, listLine, projectFolderName, transcriptTitle,
   choiceLabel, chosenProfile, COMPACT_INSTRUCTIONS, flagApplies, flagEnds, handoffName, handoffText, isOver, isPaused, LARGE_CONTEXT, LARGE_STOP,
   moveChoices, NOT_NOW, parsePercent, pausedNote, resumePrompt, stopLine, stopPoint, stopReason, summaryOf, USAGE_STOP, usagePhrase, windowKey, windowName, worstWindow,
+  chooseOpenProfile, hostWindow, parseParents, PARENTS_SCRIPT, windowNote, profileWord,
 } from "./core.mjs";
 import {
   configDirsInShell, homeCandidates, isInstalled, isSafeFolder, isSafeName, isUnreadable, looksLikeProfile,
@@ -84,6 +85,16 @@ let usage = freshUsage();
 function freshUsage() {
   return { window: null, contextPercent: undefined, account: USAGE_STOP, large: { stop: LARGE_STOP, context: LARGE_CONTEXT }, launch: [], here: 0, handled: new Set(), isHeld: false, heldUntil: 0, isStopping: false };
 }
+// The app window this session runs in (core hostWindow), looked up once at start: a promise of
+// the name, or "" when it isn't in one or can't be told.
+let windowLookup = Promise.resolve("");
+// Window notifications (see notifyWindow): whether the notification helper is built, found
+// once, and when the last notification was raised, so a prompt and its turn don't double up.
+let linkLookup = null;
+let notifiedAt = 0;
+// The folder the open in progress uses: this session's own, or the project folder of a spare (workFolder).
+let openFolder = null;
+const NOTIFY_GAP_MS = 5_000;
 
 export function register(on) {
   on("session.start", async ($, e, next) => {
@@ -130,8 +141,20 @@ export function register(on) {
       mainTurn = null;
       endTurn();
       void poll($);
+      void notifyWindow($, "finished");
     }
     return result;
+  });
+
+  // A permission prompt, a question or a plan waiting on the person: a notification that opens this
+  // session's own window (the app's own would open the main window's last session).
+  on("tool.check", async ($, e, next) => {
+    const verdict = await next(e);
+    if (verdict?.decision === "ask" && e.agentId === undefined && e.approver === "person") {
+      const what = { AskUserQuestion: "has a question for you", ExitPlanMode: "has a plan for you to approve" }[e.tool] ?? `needs your approval (${String(e.tool).replace(/^mcp__/, "").slice(0, 40)})`;
+      void notifyWindow($, what);
+    }
+    return verdict;
   });
 
   // The usage guard reads every measurement: a window over this session's stop point stops it.
@@ -182,8 +205,9 @@ export function register(on) {
     const now = await $.clock.now();
     const others = (await readSessions($)).filter((r) => r.id !== me.id && isLive(r, now));
     const lines = others.map((r) => `${listLine(r)}${isPaused(r) ? " (paused near its usage limit)" : ""}`);
+    await windowLookup;
     const mine = usagePhrase(me.usage);
-    return { result: `You are ${labelOf(me)}${mine ? `, ${mine}` : ""}.\n${lines.length ? `Also running:\n${lines.join("\n")}` : "No other session is running Crosstalk."}` };
+    return { result: `You are ${labelOf(me)}${windowNote(me)}${mine ? `, ${mine}` : ""}.\n${lines.length ? `Also running:\n${lines.join("\n")}` : "No other session is running Crosstalk."}` };
   });
 
   on("tool.call", { tool: SEND }, async ($, e) => {
@@ -213,7 +237,7 @@ export function register(on) {
     if (!me) {
       return notReady();
     }
-    const opened = await openSession($, String(e.profile ?? "").trim().toLowerCase(), String(e.message ?? ""), { model: e.model, permissionMode: e.permissionMode });
+    const opened = await openSession($, String(e.profile ?? ""), String(e.message ?? ""), { model: e.model, permissionMode: e.permissionMode });
     return opened.error ? failed(opened.error) : { result: opened.text };
   });
 
@@ -238,11 +262,26 @@ export function register(on) {
       if (parts.error) {
         return { text: parts.error };
       }
-      const opened = await openSession($, parts.profile, parts.message, { model: parts.model, permissionMode: parts.permissionMode });
+      const opened = await openSession($, parts.profile, parts.message, { model: parts.model, permissionMode: parts.permissionMode, openIn: parts.openIn });
       return { text: opened.error ?? opened.text };
     }
-    if (word === "open-in") {
+    if (word === "open-in" || word === "where") {
       return { text: await openInCommand($, String(words[1] ?? "").toLowerCase()) };
+    }
+    if (word === "to") {
+      return { text: await toCommand($, String(words[1] ?? ""), words.slice(2).join(" ")) };
+    }
+    if (word === "help") {
+      return { text: HELP };
+    }
+    // /crosstalk fuuk fix the tests: a profile's name where a command would be means open it.
+    if (word !== "" && (await isKnownProfile($, profileWord(word)))) {
+      const parts = parseOpenArgs(words);
+      if (parts.error) {
+        return { text: parts.error };
+      }
+      const opened = await openSession($, parts.profile, parts.message, { model: parts.model, permissionMode: parts.permissionMode, openIn: parts.openIn });
+      return { text: opened.error ?? opened.text };
     }
     if (word === "editor") {
       return { text: await editorCommand($, String(words[1] ?? "").toLowerCase()) };
@@ -259,8 +298,59 @@ export function register(on) {
     const now = await $.clock.now();
     const others = (await readSessions($)).filter((r) => r.id !== me.id && isLive(r, now)).map(labelOf);
     const hint = others.length ? "" : " /crosstalk setup connects your other profiles.";
-    return { text: `You are ${labelOf(me)}${isOff ? " (off)" : ""}. Others running: ${others.join(", ") || "none"}. Wake-ups since you last typed: ${wakes} of ${limit}.${hint}` };
+    await windowLookup;
+    return { text: `You are ${labelOf(me)}${windowNote(me)}${isOff ? " (off)" : ""}. Others running: ${others.join(", ") || "none"}. Wake-ups since you last typed: ${wakes} of ${limit}.${hint}\n${SHORT_HELP}` };
   });
+}
+
+const SHORT_HELP = "/crosstalk <profile> [message] opens a session on that profile, where you are now (/crosstalk where shows how). /crosstalk to <who> <message> sends. /crosstalk setup connects profiles. /crosstalk help lists the rest.";
+const HELP = [
+  "/crosstalk <profile> [message]  open a session on that profile (same as open)",
+  "/crosstalk open [profile] [--model m] [--mode p] [--in app|panel|editor|window] [message]",
+  "/crosstalk to <who> <message>  send a message to a running session",
+  "/crosstalk where [auto|app|panel|editor|window]  show or set where open puts a new session",
+  "/crosstalk setup [yes]  connect your profiles, the editor helper and app-window notifications",
+  "/crosstalk add <name>  make a new profile",
+  "/crosstalk editor [auto|code|codium], launch <profile> <command>  advanced",
+  "/crosstalk usage, move <profile>  the usage guard",
+  "/crosstalk off | on  pause or resume",
+].join("\n");
+
+// A profile Crosstalk knows: one running, saved by name or launch command, or with its folder.
+async function isKnownProfile($, name) {
+  if (!PROFILE_WORD.test(name)) {
+    return false;
+  }
+  if (name === me.profile || name === "default") {
+    return true;
+  }
+  const setup = await readJson($, `${root}/setup.json`, {});
+  if (Object.values(setup.names ?? {}).includes(name) || Object.hasOwn(setup.launch ?? {}, name)) {
+    return true;
+  }
+  const now = await $.clock.now();
+  if ((await readSessions($)).some((r) => r.profile === name && isLive(r, now))) {
+    return true;
+  }
+  const pc = await computer($);
+  return Boolean(await listFolder($, `${pc.home}/.claude-${name}`));
+}
+
+// /crosstalk to <who> <message>: the send tool, without a turn to ask the model.
+async function toCommand($, who, text) {
+  if (who === "" || text.trim() === "") {
+    return "Usage: /crosstalk to <who> <message>, such as /crosstalk to fuuk check the build. <who> is an address, a session's title or a profile with one session running.";
+  }
+  if (text.length > MAX_TEXT) {
+    return `The message is ${text.length} characters; the most is ${MAX_TEXT}.`;
+  }
+  const now = await $.clock.now();
+  const found = resolveTarget(who, await readSessions($), me.id, now);
+  if (found.error) {
+    return found.error;
+  }
+  await writeMessage($, found.record, text, now);
+  return `Sent to ${labelOf(found.record)}.${isPaused(found.record) ? pausedNote(found.record) : ""}`;
 }
 
 // The person's computer, as setup needs it. CLAUDE_CROSSTALK_HOME stands in for the home folder, so
@@ -507,10 +597,11 @@ async function setupCommand($, words) {
 
 async function applySetup($, pc, setup) {
   const { plan, targets, problems } = await survey($, pc, setup);
+  const windows = await installAppWindows($, pc);
   if (!plan.toInstall.length && !plan.shortcuts.length) {
-    return "Nothing to do: every profile here has Crosstalk and a way to start it.";
+    return `Nothing to do: every profile here has Crosstalk and a way to start it.${windows ? `\n${windows}` : ""}`;
   }
-  const lines = [];
+  const lines = windows ? [windows] : [];
   for (const r of plan.toInstall) {
     if (await installOn($, pc, r.folder)) {
       lines.push(`Installed on ${r.name}.`);
@@ -531,6 +622,24 @@ async function applySetup($, pc, setup) {
   }
   lines.push("  - Restart any session already open, as sessions load Crosstalk when they start.", "  - Then run /crosstalk on any of them to see who it can reach.");
   return lines.join("\n");
+}
+
+// On Windows with a second Claude app window (a ~\.claude-<name>-app folder), install the
+// app-window scripts and the link that makes its notifications open the right window.
+async function installAppWindows($, pc) {
+  if (!pc.isWindows || pc.isSeam) {
+    return "";
+  }
+  const hasWindow = ((await listFolder($, pc.home)) ?? []).some((e) => /^\.claude-.+-app$/i.test(e.name));
+  const script = `${$.plugin.root}/app-windows/install.ps1`;
+  if (!hasWindow || !(await $.fs.exists(script).catch(() => false))) {
+    return "";
+  }
+  const ran = await $.process.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], { timeoutMs: 60_000 }).catch(() => null);
+  linkLookup = null;
+  return ran && ran.exitCode === 0
+    ? "Installed the app-window scripts and the notification helper (this user only), so notifications from a profile's app window open that window."
+    : `Couldn't install the app-window notification helper. Run: powershell -ExecutionPolicy Bypass -File "${script}"`;
 }
 
 // A new profile, ready to log in to.
@@ -590,23 +699,26 @@ async function hasHelper($, pc, editor) {
 
 // Where `open` would put a new session from this one, and why: the editor (spotted from this
 // session's terminal, or set), whether its helper is installed, and the choice that follows.
-async function resolveOpening($, pc, setup) {
-  const fromEnv = await $.env.get("CLAUDE_CROSSTALK_OPEN_IN");
+async function resolveOpening($, pc, setup, override = "") {
+  const fromEnv = override || (await $.env.get("CLAUDE_CROSSTALK_OPEN_IN"));
   const termProgram = await $.env.get("TERM_PROGRAM");
   const editor = editorFor(await $.env.get("CLAUDE_CROSSTALK_EDITOR"), setup.editor, await $.env.get("VSCODE_GIT_ASKPASS_NODE"));
   const wanted = String(fromEnv || setup.openIn || "auto").toLowerCase();
   const inApp = (await $.env.get("CLAUDE_CODE_ENTRYPOINT")) === DESKTOP_ENTRYPOINT;
   // The editor helper only matters when open may use an editor tab.
-  const checked = wanted === "vscode" || (wanted !== "window" && wanted !== "app" && !inApp);
+  const checked = wanted === "vscode" || wanted === "editor" || (wanted !== "window" && wanted !== "app" && wanted !== "panel" && !inApp);
   const helper = checked ? await hasHelper($, pc, editor) : false;
   const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper, editor.label, inApp);
   const inEditor = String(termProgram ?? "").toLowerCase() === "vscode";
-  return { fromEnv, editor, helper, checked, choice, inEditor, inApp };
+  return { fromEnv, editor, helper, checked, choice, inEditor, inApp, isWindows: pc.isWindows };
 }
 
 // One line that says what `open` will do from here, and how to change it.
 function describeOpening(r, pluginRoot) {
-  if (r.choice.where === "app") {
+  if (r.choice.where === "app" && r.isWindows) {
+    return "From this session, open starts a new Code session in the named profile's own Claude app window (default: the main window), as this session runs in the app. --in panel uses the Terminal panel instead.";
+  }
+  if (r.choice.where === "app" || r.choice.where === "panel") {
     return "From this session, open starts a new tab in the Claude desktop app's Terminal panel, as this session runs in the app. The app asks you to approve the command first.";
   }
   const where = r.choice.where === "vscode" ? `a ${r.editor.label} terminal tab` : "a new terminal window";
@@ -704,7 +816,7 @@ async function trustFile($, path) {
     if (text === null) {
       return false;
     }
-    const next = trustProject(text, me.cwd);
+    const next = trustProject(text, openFolder ?? me.cwd);
     if (next === null) {
       return parsesAsObject(text); // already trusted, or not safe to touch
     }
@@ -716,7 +828,7 @@ async function trustFile($, path) {
     await $.clock.sleep(TRUST_CHECK_MS);
   }
   const last = await readText($, path);
-  return last !== null && trustProject(last, me.cwd) === null && parsesAsObject(last);
+  return last !== null && trustProject(last, openFolder ?? me.cwd) === null && parsesAsObject(last);
 }
 
 function parsesAsObject(text) {
@@ -728,12 +840,19 @@ function parsesAsObject(text) {
   }
 }
 
-// Start a session on `profile` in a new terminal, here in this folder, then say so when it is up
-// and hand it `message`. `opts` may set its model and permission mode. Returns { text } at once,
-// or { error }.
-async function openSession($, profile, message, opts = {}) {
+// Start a session on `given` in a new terminal, here in this folder, then say so when it is up
+// and hand it `message`. `given` is a profile, or none / "here" for this session's own, or
+// "window" for the account of the app window it runs in (core chooseOpenProfile). `opts` may set
+// its model and permission mode. Returns { text } at once, or { error }.
+async function openSession($, given, message, opts = {}) {
+  const window = await windowLookup;
+  const picked = chooseOpenProfile(given, me.profile, window);
+  if (picked.error) {
+    return { error: picked.error };
+  }
+  const profile = picked.profile;
   if (!PROFILE_WORD.test(profile)) {
-    return { error: "Usage: /crosstalk open <profile> [--model <model>] [--mode <permission mode>] [first message], such as /crosstalk open zai --mode plan say hello." };
+    return { error: "Usage: /crosstalk open [profile] [--model <model>] [--mode <permission mode>] [first message], such as /crosstalk open zai --mode plan say hello. With no profile it opens this session's own; \"window\" opens the account of the app window it runs in." };
   }
   const setup = await readJson($, `${root}/setup.json`, {});
   const flagged = withLaunchFlags(launchFor(profile, setup), opts);
@@ -745,23 +864,47 @@ async function openSession($, profile, message, opts = {}) {
     return { error: `${profile} would start with "${command}", and Crosstalk only starts Claude Code. Set it with /crosstalk launch ${profile} <command>.` };
   }
   const pc = await computer($);
+  openFolder = (await workFolder($)).folder ?? me.cwd;
   const isTrusted = await trustFolder($, pc, setup, profile).catch(() => false);
-  const { editor, choice } = await resolveOpening($, pc, setup);
+  const resolved = await resolveOpening($, pc, setup, String(opts.openIn ?? "").toLowerCase());
+  const { editor } = resolved;
+  let { choice } = resolved;
   const since = await $.clock.now();
   let ran = null;
   let place = "a new terminal window";
-  if (choice.where === "app") {
+  let extra = "";
+  let isWatched = true;
+  // In an editor, the helper is what opens a tab there. Missing, it is installed rather than
+  // opening a window the person didn't ask for.
+  if (choice.where === "window" && resolved.inEditor && resolved.checked && !resolved.helper && /helper isn't installed/.test(choice.why ?? "")) {
+    const installed = await installHelperNow($, pc, editor);
+    if (!installed) {
+      return { error: `Couldn't install the Crosstalk terminal helper in ${editor.label}. Run: ${helperInstall(editor, $.plugin.root)} then reload the ${editor.label} window and try again. (/crosstalk open ${profile} --in window opens a terminal window instead.)` };
+    }
+    choice = { where: "vscode" };
+    extra = ` Installed the Crosstalk terminal helper in ${editor.label}; if no tab appears, reload the ${editor.label} window once and run it again.`;
+  }
+  if (choice.where === "app" && pc.isWindows) {
+    const opened = await openInWindow($, pc, profile, message);
+    if (opened.error) {
+      return { error: opened.error };
+    }
+    place = `${profile === "default" ? "the main" : `${profile}'s`} Claude app window`;
+    extra = opened.note;
+    isWatched = opened.isSent;
+    ran = { exitCode: 0 };
+  } else if (choice.where === "app" || choice.where === "panel") {
     const opened = await openInApp($, profile, appPanelCommand(command, pc.isWindows));
     if (opened.error) {
       return { error: opened.error };
     }
-    place = "a new tab of the app's Terminal panel";
+    place = window ? `a new tab of the ${window} app window's Terminal panel` : "a new tab of the app's Terminal panel";
     ran = { exitCode: 0 };
   } else if (choice.where === "vscode") {
     place = `a new ${editor.label} terminal`;
-    ran = await runCode($, pc, editor, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: me.cwd, cmd: command }, editor.scheme)]);
+    ran = await runCode($, pc, editor, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: openFolder ?? me.cwd, cmd: command }, editor.scheme)]);
   } else {
-    const opener = pc.isWindows ? { argv: windowArgv(me.cwd, command) } : await unixWindow($, command);
+    const opener = pc.isWindows ? { argv: windowArgv(openFolder ?? me.cwd, command) } : await unixWindow($, command);
     if (opener.error) {
       return { error: opener.error };
     }
@@ -774,9 +917,16 @@ async function openSession($, profile, message, opts = {}) {
   if (!ran || ran.exitCode !== 0) {
     return { error: `Couldn't open ${place}${ran?.stderr ? `: ${ran.stderr.trim().slice(0, 200)}` : "."}` };
   }
-  void watchOpened($, profile, since - 2_000, message).catch(() => {});
+  const isWindowOpen = choice.where === "app" && pc.isWindows;
+  if (isWatched) {
+    void watchOpened($, profile, since - 2_000, isWindowOpen ? "" : message).catch(() => {});
+  }
   const trust = isTrusted ? "" : ` Crosstalk couldn't mark this folder trusted for ${profile}, so it may stop at the folder-trust screen until someone answers it.`;
-  return { text: `Opening ${profile} (${command}) in ${place}${choice.why ? `, as ${choice.why}` : ""}. Crosstalk says here when it is up${message.trim() ? ", then sends it your message" : ""}.${trust}` };
+  const pickedWhy = picked.why ? ` ${profile} is ${picked.why}.${picked.note}` : "";
+  if (isWindowOpen) {
+    return { text: `Opened ${profile} in ${place}.${pickedWhy}${extra}${trust}` };
+  }
+  return { text: `Opening ${profile} (${command}) in ${place}${choice.why ? `, as ${choice.why}` : ""}.${pickedWhy} Crosstalk says here when it is up${message.trim() ? ", then sends it your message" : ""}.${extra}${trust}` };
 }
 
 // A new tab in the Claude desktop app's Terminal panel, through the app's own tool, so the
@@ -787,7 +937,7 @@ async function openInApp($, profile, command) {
   const instead = "/crosstalk open-in window opens a terminal window instead.";
   let answer;
   try {
-    answer = await $.tool.call({ tool: APP_TERMINAL, command, cwd: me.cwd, title: `claude ${profile}` });
+    answer = await $.tool.call({ tool: APP_TERMINAL, command, cwd: openFolder ?? me.cwd, title: `claude ${profile}` });
   } catch (err) {
     return { error: `Couldn't reach the app's Terminal panel (${String(err?.message ?? err).slice(0, 200)}). ${instead}` };
   }
@@ -798,6 +948,109 @@ async function openInApp($, profile, command) {
     return { error: `The app's Terminal panel didn't run it: ${resultText(answer).slice(0, 300)}. ${instead}` };
   }
   return {};
+}
+
+// A Code session in the profile's own Claude app window (the main window for default), through the
+// plugin's app-windows scripts: the app's claude://code/new link in that window, with the folder
+// and the first message filled in, and Send pressed when there is a message. A Code-tab session
+// only exists once its first message is sent, so with no message the window is opened on a fresh
+// session and the person types. Returns { note, isSent } or { error }.
+const WINDOW_MESSAGE_MAX = 6_000;
+async function openInWindow($, pc, profile, message) {
+  const script = `${$.plugin.root}/app-windows/claude-new-session.ps1`;
+  const instead = `/crosstalk open ${profile} --in panel opens it in the Terminal panel instead.`;
+  if (profile !== "default" && !(await listFolder($, `${pc.home}/.claude-${profile}-app`))) {
+    return { error: `${profile} has no Claude app window on this computer yet. Open it once and sign in: run app-windows\\claude-app.ps1 ${profile} (docs/desktop-app.md). ${instead}` };
+  }
+  const text = message.trim();
+  if (text.length > WINDOW_MESSAGE_MAX) {
+    return { error: `The first message is ${text.length} characters; a new app session takes ${WINDOW_MESSAGE_MAX}. Write it to a file and send the path.` };
+  }
+  const where = await workFolder($);
+  if (where.error) {
+    return { error: `${where.error} ${instead}` };
+  }
+  const argv = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, profile, where.folder];
+  if (text) {
+    const file = `${root}/handoffs/open-${await $.clock.now()}.txt`;
+    await $.fs.write(file, `[Crosstalk] ${labelOf(me)} opened this session. It says:\n\n${text}`);
+    argv.push("-PromptFile", file, "-Send");
+  }
+  const ran = await $.process.run(argv, { timeoutMs: 120_000 }).catch(() => null);
+  if (!ran || ran.exitCode !== 0) {
+    const why = String(ran?.stderr || ran?.stdout || "").trim().slice(0, 300);
+    return { error: `Couldn't open the ${profile} app window${why ? `: ${why}` : "."} ${instead}` };
+  }
+  return text
+    ? { note: " Its first message was sent. Crosstalk says here when it is up.", isSent: true, folder: where.folder }
+    : { note: " It is open on a new session with this folder; nothing was sent, so type there.", isSent: false, folder: where.folder };
+}
+
+// The folder a new session should open in. A session the desktop app started ahead of time (a
+// "spare") runs in a temporary folder under the profile's spares folder, which the app deletes
+// once the session is in use; the project folder is in the session's app file. Any other session
+// is in its own folder.
+async function workFolder($) {
+  if (!/[\\/]spares[\\/]spare-/i.test(String(me.cwd))) {
+    return { folder: me.cwd };
+  }
+  const data = titling?.appFile ? await readJson($, titling.appFile, null) : null;
+  for (const key of ["cwd", "originCwd"]) {
+    const folder = data?.[key];
+    if (typeof folder === "string" && folder !== "" && !/[\\/]spares[\\/]spare-/i.test(folder)) {
+      return { folder };
+    }
+  }
+  return { error: "This session runs in a temporary folder the app made for it (a spare), and Crosstalk couldn't find the project folder it is working in." };
+}
+
+// Install the editor helper from the plugin's own .vsix. True when the editor says it did.
+async function installHelperNow($, pc, editor) {
+  const vsix = `${String($.plugin.root).replace(/\\/g, "/").replace(/\/+$/, "")}/vscode/crosstalk-terminal-0.3.0.vsix`;
+  if (!(await $.fs.exists(vsix).catch(() => false))) {
+    return false;
+  }
+  const ran = await runCode($, pc, editor, ["--install-extension", vsix]);
+  return Boolean(ran && ran.exitCode === 0);
+}
+
+// Whether the notification helper is built (Windows; install.ps1 and /crosstalk setup yes do it).
+async function hasToastHost($) {
+  if (!(await computer($)).isWindows) {
+    return false;
+  }
+  return $.fs.exists(`${root}/app-windows/ToastHost.exe`).catch(() => false);
+}
+
+// A Windows notification for this session that, clicked, opens its own app window on it. The app's
+// own notifications all belong to one app identity, so a click opens the main window's last
+// session whichever window raised it. Only for a Code-tab session in an account window other than
+// the main one, once the helper is built. Never waits on or fails a turn.
+async function notifyWindow($, what) {
+  try {
+    if (!me || isOff) {
+      return;
+    }
+    const window = await windowLookup;
+    const hostId = String((await $.env.get("CLAUDE_CODE_HOST_SESSION_ID")) ?? "");
+    if (!window || window === "default" || !HOST_SESSION.test(hostId)) {
+      return;
+    }
+    const now = await $.clock.now();
+    if (now - notifiedAt < NOTIFY_GAP_MS) {
+      return;
+    }
+    linkLookup ??= hasToastHost($);
+    if (!(await linkLookup)) {
+      return;
+    }
+    notifiedAt = now;
+    const script = `${root}/app-windows/claude-toast.ps1`;
+    const title = String(me.title || me.address).replace(/["\r\n]+/g, " ").slice(0, 80);
+    await $.process.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, window, hostId, title, `${window}: ${what}`], { timeoutMs: 30_000 });
+  } catch {
+    // a missed notification is not worth a failed turn
+  }
 }
 
 function resultText(answer) {
@@ -836,11 +1089,11 @@ async function unixWindow($, command) {
   return { argv: linuxArgv(terminal, me.cwd, command, shell), place: terminal === "tmux" ? "a new tmux window" : `a new ${terminal} window` };
 }
 
-async function watchOpened($, profile, since, message) {
+async function watchOpened($, profile, since, message, cwd = openFolder ?? me.cwd) {
   for (let i = 0; i < OPEN_WAIT_S; i += 1) {
     await $.clock.sleep(1_000);
     const now = await $.clock.now();
-    const found = findOpened(await readSessions($), profile, me.cwd, since, now);
+    const found = findOpened(await readSessions($), profile, cwd, since, now);
     if (found) {
       if (message.trim()) {
         await writeMessage($, found, message.trim(), now);
@@ -860,6 +1113,20 @@ function notReady() {
   return failed("Crosstalk did not start in this session.");
 }
 
+// The Claude desktop app window this session runs in, from its parent processes: "" when it
+// doesn't run in the app, isn't on Windows, or the walk fails. CLAUDE_CROSSTALK_WINDOW sets it.
+async function findWindow($) {
+  const set = await $.env.get("CLAUDE_CROSSTALK_WINDOW");
+  if (set) {
+    return String(set).trim().toLowerCase();
+  }
+  if ((await $.env.get("CLAUDE_CODE_ENTRYPOINT")) !== DESKTOP_ENTRYPOINT || !(await computer($)).isWindows) {
+    return "";
+  }
+  const ran = await $.process.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", PARENTS_SCRIPT], { timeoutMs: 20_000 }).catch(() => null);
+  return ran && ran.exitCode === 0 ? hostWindow(parseParents(ran.stdout)) : "";
+}
+
 async function startUp($) {
   const home = (await $.env.get("CLAUDE_CROSSTALK_HOME")) || (await $.env.get("USERPROFILE")) || (await $.env.get("HOME"));
   const folder = await $.env.get("CLAUDE_CROSSTALK_DIR");
@@ -876,6 +1143,14 @@ async function startUp($) {
   const cwd = await $.session.cwd();
   const alias = addressOf(profile, cwd, id);
   me = { id, profile, address: alias, alias, cwd, startedAt: await $.clock.now(), title: "" };
+  // Not awaited: the process walk takes a second or two, and only open and list need it.
+  windowLookup = findWindow($).then(async (name) => {
+    if (name) {
+      me.window = name;
+      await beat($).catch(() => {}); // so other sessions' list shows it now, not at the next beat
+    }
+    return name;
+  }, () => "");
   titling = await titleSources($, profile, config || `${home}/.claude`, id, cwd);
   me.account = titling.account || undefined;
   usage = freshUsage();
@@ -903,20 +1178,20 @@ async function startUp($) {
   });
   await $.tool.register({
     name: "open",
-    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in a tab of the Claude desktop app's Terminal panel when this session runs in the app (so the profile's own account runs inside the app), in VS Code or VSCodium when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
+    description: "Start a new Claude Code session on a profile in this session's folder, with an optional first message. Pass the profile the person named, as they said it (fuuk, \"claude fuuk\", \"the work app\"); leave it out for \"another session\" with no account named. Do not choose where it opens: Crosstalk opens it in the same place this session runs (that profile's own Claude app window, the VS Code or VSCodium terminal, or a terminal window). `model` and `permissionMode` are optional.",
     inputSchema: {
       type: "object",
       properties: {
-        profile: { type: "string", description: "The profile to start, as /crosstalk names them" },
+        profile: { type: "string", description: "The profile the person named. Leave it out for this session's own profile" },
         message: { type: "string", description: "A first message to send it once it is running" },
         model: { type: "string", description: "Model for the new session, one word such as sonnet, opus or claude-sonnet-5-5" },
         permissionMode: { type: "string", enum: PERMISSION_MODES, description: "Permission mode for the new session" },
       },
-      required: ["profile"],
+      required: [],
     },
     isDeferred: false,
   });
-  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. open <profile> [--model m] [--mode p] [message] starts one; open-in, editor and launch set how (open-in alone shows what it will do); setup connects profiles; add <name> makes one; usage shows or sets where sessions stop near the usage limit; move <profile> hands this session to another account now; off and on pause it." });
+  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. <profile> [message] opens a session on that profile where you are; to <who> <message> sends; where shows or sets where open puts it; setup connects profiles; help lists the rest." });
   $.clock.every(BEAT_MS, () => beat($).catch(() => {}));
   $.clock.every(POLL_MS, () => poll($).catch(() => {}));
   void prune($);

@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.8.2
+
+- **Notification clicks work.** Windows would not run a custom link when a notification was clicked ("Get an app to open this link"), and removes a notification when the program that raised it ends. So the notification is now raised by `ToastHost.exe`, a small program `install.ps1` builds with the C# compiler that comes with Windows. It stays hidden for 15 minutes, hears the click itself, and opens that window on that session. No link or default-app entry is registered any more, and `install.ps1` removes the ones an earlier build made.
+- The click handler (`claude-open-link.ps1`) only opens a window that already exists, so it can't start a new signed-out one, and logs each click to `open-link.log` in Crosstalk's folder.
+
+## 1.8.1
+
+- A session the app started ahead of time (a "spare") runs in a temporary folder that the app deletes once the session is in use. `open` now opens in the project folder from the session's app record instead, so it no longer fails with "No such folder: ...\spares\spare-...". If the project folder can't be found it says so.
+- Each window's notification name ("Claude (mikey)") is set up front, on the Start-menu shortcut of that name.
+
+## 1.8.0
+
+**`open` goes where you are, and never somewhere else**
+- From a Claude desktop app session on Windows, `open fuuk` starts a Code session in **fuuk's own app window** (`default` is the main window), with the folder and your first message filled in and sent. Before, it typed a command into a Terminal-panel tab of the window you were in. Use `--in panel` for the old behaviour. A profile with no app window yet is told plainly, with how to make one.
+- From a VS Code or VSCodium terminal, it opens a tab in that editor. If the Crosstalk terminal helper isn't installed there, `open` installs it from the plugin and tells you to reload the window once, instead of opening a terminal window you didn't ask for. A terminal window is used only outside an editor or when you ask (`--in window`).
+- Profiles are understood as people say them: `fuuk`, `claude-fuuk`, `claude fuuk`, "the fuuk app".
+
+**Shorter commands**
+- `/crosstalk <profile> [message]` opens a session. `/crosstalk to <who> <message>` sends without a model turn. `/crosstalk where` shows or sets where `open` puts a session (it replaces `open-in` and takes `panel` and `editor` too). `/crosstalk help` lists the rest; plain `/crosstalk` is now short. The old commands still work.
+- The `open` tool's description is shorter and tells the model not to pick where a session opens.
+
+**Notifications that open the right window (Windows)**
+- A session in an account's app window (not the main one) now raises its own notification when a turn finishes, or when it needs a permission, answers a question or approves a plan. Clicking it opens that window on that session. The app's own notifications all belong to one app identity, so a click always went to the main window's last session.
+- `/crosstalk setup yes` (or `app-windows\install.ps1`) installs it for this user only: a notification helper and a notification name per window. `install.ps1 -Uninstall` removes the names.
+- To avoid doubles, turn off "task complete" and set permission and question notifications to badge in each account window's own Settings. The main window keeps its own.
+
+**Sessions know their window, and `open` needs no profile**
+- `open` no longer needs a profile. With none, it starts this session's own profile, so "open a different session" stays on the account you're working in. A profile you name still wins.
+- On Windows, Crosstalk finds the desktop-app window a session runs in from its parent processes. A Terminal-panel tab counts as its window's, so a `mikey` session in a tab of the `fuuk` window is "in the fuuk app window". `list` and `/crosstalk` show it, and `/crosstalk open window` (or the `open` tool with `profile: "window"`) starts that window's account. If the window can't be found, Crosstalk says so and doesn't guess. `CLAUDE_CROSSTALK_WINDOW` overrides it.
+- `claude-new-session.ps1 here ...` opens in the window you're in, and `-DryRun` shows which window it would use and why, without opening anything. The `move-chat` skill uses `here` for "use a different session", and asks which account to use when the reason is a usage limit and you didn't name one.
+
 ## 1.7.0
 
 **Usage guard**
