@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.8.1
+
+- A session the app started ahead of time (a "spare") runs in a temporary folder that the app deletes once the session is in use. `open` now opens in the project folder from the session's app record instead, so it no longer fails with "No such folder: ...\spares\spare-...". If the project folder can't be found it says so.
+- `install.ps1` tells the shell a link handler changed and makes each window's notification name up front, so the first notification already says "Claude (mikey)" and a click finds the `crosstalk-window:` handler.
+
 ## 1.8.0
 
 **`open` goes where you are, and never somewhere else**

@@ -37,6 +37,20 @@ if (-not $NoLink -and $PSCmdlet.ShouldProcess($protocol, 'Register the crosstalk
     Set-ItemProperty -Path $protocol -Name '(default)' -Value 'URL:Crosstalk window'
     New-ItemProperty -Path $protocol -Name 'URL Protocol' -Value '' -Force | Out-Null
     Set-ItemProperty -Path "$protocol\shell\open\command" -Name '(default)' -Value $open
+    # A name for each window's notifications, made now so the first one already shows it.
+    $exe = Find-ClaudeExe
+    foreach ($d in Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Force | Where-Object { $_.Name -match '^\.claude-(.+)-app$' }) {
+        $win = ($d.Name -replace '^\.claude-', '' -replace '-app$', '').ToLowerInvariant()
+        if ($win -notmatch '^[a-z0-9][a-z0-9_-]{0,30}$') { continue }
+        $k = "HKCU:\Software\Classes\AppUserModelId\Crosstalk.Claude.$win"
+        New-Item -Path $k -Force | Out-Null
+        New-ItemProperty -Path $k -Name DisplayName -Value "Claude ($win)" -Force | Out-Null
+        if ($exe) { New-ItemProperty -Path $k -Name IconUri -Value $exe -Force | Out-Null }
+    }
+    # Tell the shell a link handler changed, so it that is already running (it shows the
+    # notifications) doesn't go on answering "no app for this link".
+    Add-Type -Namespace Xt -Name Shell -MemberDefinition '[System.Runtime.InteropServices.DllImport("shell32.dll")] public static extern void SHChangeNotify(int eventId, uint flags, System.IntPtr a, System.IntPtr b);'
+    [Xt.Shell]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
     "Link: crosstalk-window: (this user only)"
 }
 

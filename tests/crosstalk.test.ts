@@ -120,7 +120,7 @@ function fakeDisk(on: any, env: Record<string, string> = { USERPROFILE: 'C:\\hom
   const files: any = new Map<string, string>()
   on('env.get', (_: any, e: any) => ({ value: env[e.name] }))
   on('session.id', () => ({ value: 'self-1' }))
-  on('session.cwd', () => ({ value: 'C:\\code\\proj' }))
+  on('session.cwd', () => ({ value: env.TEST_CWD ?? 'C:\\code\\proj' }))
   on('tool.register', (_: any, e: any) => ({ value: { tool: `mcp__crosstalk__${e.name}` } }))
   on('command.register', (_: any, e: any) => ({ value: { command: e.name } }))
   on('fs.write', (_: any, e: any) => { files.set(slash(e.path), e.text); return { value: undefined } })
@@ -1270,6 +1270,23 @@ test('from the app on Windows, open starts the session in the named profile\'s o
   const main: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'default' } as never)
   expect(JSON.stringify(main)).toMatch(/Opened default in the main Claude app window\..*nothing was sent/)
   expect(calls.filter((a) => a.includes('-Send'))).toHaveLength(1)
+})
+
+test('a spare session opens in its project folder, from the app file, not its temporary one', async ($, on) => {
+  const SPARE = 'C:\\home\\.claude-work\\spares\\spare-AbC123'
+  const calls: any[] = []
+  const files: any = fakeDisk(on, { ...APP_ENV, CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', TEST_CWD: SPARE }, (e: any) => { calls.push(e.argv); return RAN_OK })
+  on('clock.sleep', () => ({ value: undefined }))
+  files.set('C:/home/.claude-fuuk-app/Preferences', '{}')
+  const appPath = `${APP}/claude-code-sessions/acct/org/local_abc-1.json`
+  files.set(appPath, JSON.stringify({ sessionId: 'local_abc-1', cliSessionId: 'self-1', title: 'Spare', cwd: 'C:\\code\\real', originCwd: 'C:\\code\\real' }))
+  await $.session.start({ ...START, cwd: SPARE })
+  expect(JSON.stringify(await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'fuuk', message: 'hi' } as never))).toMatch(/Opened fuuk in fuuk's Claude app window/)
+  const run = calls.find((a) => a.some((x: string) => /claude-new-session\.ps1$/.test(x)))!
+  expect(run[run.indexOf('fuuk') + 1]).toBe('C:\\code\\real')
+  // Without a project folder on record, it says so instead of handing the app a folder that is gone.
+  files.set(appPath, JSON.stringify({ sessionId: 'local_abc-1', cliSessionId: 'self-1', title: 'Spare', cwd: SPARE }))
+  expect(JSON.stringify(await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'fuuk', message: 'hi' } as never))).toMatch(/temporary folder the app made/)
 })
 
 test('a profile with no app window yet is said, not guessed at, and --in panel still works', async ($, on) => {

@@ -92,6 +92,8 @@ let windowLookup = Promise.resolve("");
 // once, and when the last notification was raised, so a prompt and its turn don't double up.
 let linkLookup = null;
 let notifiedAt = 0;
+// The folder the open in progress uses: this session's own, or the project folder of a spare (workFolder).
+let openFolder = null;
 const NOTIFY_GAP_MS = 5_000;
 
 export function register(on) {
@@ -814,7 +816,7 @@ async function trustFile($, path) {
     if (text === null) {
       return false;
     }
-    const next = trustProject(text, me.cwd);
+    const next = trustProject(text, openFolder ?? me.cwd);
     if (next === null) {
       return parsesAsObject(text); // already trusted, or not safe to touch
     }
@@ -826,7 +828,7 @@ async function trustFile($, path) {
     await $.clock.sleep(TRUST_CHECK_MS);
   }
   const last = await readText($, path);
-  return last !== null && trustProject(last, me.cwd) === null && parsesAsObject(last);
+  return last !== null && trustProject(last, openFolder ?? me.cwd) === null && parsesAsObject(last);
 }
 
 function parsesAsObject(text) {
@@ -862,6 +864,7 @@ async function openSession($, given, message, opts = {}) {
     return { error: `${profile} would start with "${command}", and Crosstalk only starts Claude Code. Set it with /crosstalk launch ${profile} <command>.` };
   }
   const pc = await computer($);
+  openFolder = (await workFolder($)).folder ?? me.cwd;
   const isTrusted = await trustFolder($, pc, setup, profile).catch(() => false);
   const resolved = await resolveOpening($, pc, setup, String(opts.openIn ?? "").toLowerCase());
   const { editor } = resolved;
@@ -899,9 +902,9 @@ async function openSession($, given, message, opts = {}) {
     ran = { exitCode: 0 };
   } else if (choice.where === "vscode") {
     place = `a new ${editor.label} terminal`;
-    ran = await runCode($, pc, editor, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: me.cwd, cmd: command }, editor.scheme)]);
+    ran = await runCode($, pc, editor, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: openFolder ?? me.cwd, cmd: command }, editor.scheme)]);
   } else {
-    const opener = pc.isWindows ? { argv: windowArgv(me.cwd, command) } : await unixWindow($, command);
+    const opener = pc.isWindows ? { argv: windowArgv(openFolder ?? me.cwd, command) } : await unixWindow($, command);
     if (opener.error) {
       return { error: opener.error };
     }
@@ -934,7 +937,7 @@ async function openInApp($, profile, command) {
   const instead = "/crosstalk open-in window opens a terminal window instead.";
   let answer;
   try {
-    answer = await $.tool.call({ tool: APP_TERMINAL, command, cwd: me.cwd, title: `claude ${profile}` });
+    answer = await $.tool.call({ tool: APP_TERMINAL, command, cwd: openFolder ?? me.cwd, title: `claude ${profile}` });
   } catch (err) {
     return { error: `Couldn't reach the app's Terminal panel (${String(err?.message ?? err).slice(0, 200)}). ${instead}` };
   }
@@ -963,7 +966,11 @@ async function openInWindow($, pc, profile, message) {
   if (text.length > WINDOW_MESSAGE_MAX) {
     return { error: `The first message is ${text.length} characters; a new app session takes ${WINDOW_MESSAGE_MAX}. Write it to a file and send the path.` };
   }
-  const argv = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, profile, me.cwd];
+  const where = await workFolder($);
+  if (where.error) {
+    return { error: `${where.error} ${instead}` };
+  }
+  const argv = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, profile, where.folder];
   if (text) {
     const file = `${root}/handoffs/open-${await $.clock.now()}.txt`;
     await $.fs.write(file, `[Crosstalk] ${labelOf(me)} opened this session. It says:\n\n${text}`);
@@ -975,8 +982,26 @@ async function openInWindow($, pc, profile, message) {
     return { error: `Couldn't open the ${profile} app window${why ? `: ${why}` : "."} ${instead}` };
   }
   return text
-    ? { note: " Its first message was sent. Crosstalk says here when it is up.", isSent: true }
-    : { note: " It is open on a new session with this folder; nothing was sent, so type there.", isSent: false };
+    ? { note: " Its first message was sent. Crosstalk says here when it is up.", isSent: true, folder: where.folder }
+    : { note: " It is open on a new session with this folder; nothing was sent, so type there.", isSent: false, folder: where.folder };
+}
+
+// The folder a new session should open in. A session the desktop app started ahead of time (a
+// "spare") runs in a temporary folder under the profile's spares folder, which the app deletes
+// once the session is in use; the project folder is in the session's app file. Any other session
+// is in its own folder.
+async function workFolder($) {
+  if (!/[\\/]spares[\\/]spare-/i.test(String(me.cwd))) {
+    return { folder: me.cwd };
+  }
+  const data = titling?.appFile ? await readJson($, titling.appFile, null) : null;
+  for (const key of ["cwd", "originCwd"]) {
+    const folder = data?.[key];
+    if (typeof folder === "string" && folder !== "" && !/[\\/]spares[\\/]spare-/i.test(folder)) {
+      return { folder };
+    }
+  }
+  return { error: "This session runs in a temporary folder the app made for it (a spare), and Crosstalk couldn't find the project folder it is working in." };
 }
 
 // Install the editor helper from the plugin's own .vsix. True when the editor says it did.
@@ -1066,11 +1091,11 @@ async function unixWindow($, command) {
   return { argv: linuxArgv(terminal, me.cwd, command, shell), place: terminal === "tmux" ? "a new tmux window" : `a new ${terminal} window` };
 }
 
-async function watchOpened($, profile, since, message) {
+async function watchOpened($, profile, since, message, cwd = openFolder ?? me.cwd) {
   for (let i = 0; i < OPEN_WAIT_S; i += 1) {
     await $.clock.sleep(1_000);
     const now = await $.clock.now();
-    const found = findOpened(await readSessions($), profile, me.cwd, since, now);
+    const found = findOpened(await readSessions($), profile, cwd, since, now);
     if (found) {
       if (message.trim()) {
         await writeMessage($, found, message.trim(), now);
