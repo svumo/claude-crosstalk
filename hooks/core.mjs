@@ -27,9 +27,13 @@ export function profileName(override, configDir, pluginRoot) {
   return match ? clean(match[1]) || "default" : "default";
 }
 
-// work/my-project-1a2b: readable, and unique through the end of the session id.
-export function addressOf(profile, cwd, sessionId) {
-  const slug = lastFolder(cwd).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "session";
+const slugOf = (text) => String(text ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+/, "").slice(0, 32).replace(/-+$/, "");
+
+// work/fix-the-login-page-1a2b: readable, and unique through the end of the session id. Named
+// after the session's title once it has one, so the address matches the name the person sees,
+// and after its folder until then (work/my-project-1a2b). The folder one stays a session's alias.
+export function addressOf(profile, cwd, sessionId, title) {
+  const slug = slugOf(title) || slugOf(lastFolder(cwd)) || "session";
   return `${profile}/${slug}-${String(sessionId).replace(/-/g, "").slice(0, 4)}`;
 }
 
@@ -38,7 +42,7 @@ export function isLive(record, now) {
 }
 
 // Session titles: the name the person sees for a session, which changes as it runs (the desktop
-// app names a session after its first message; /rename renames it). The address stays the same.
+// app names a session after its first message; /rename renames it). The address follows it (addressOf).
 
 const TITLE_MAX = 120;
 
@@ -148,8 +152,11 @@ export function resolveTarget(to, records, selfId, now) {
   if (want === "") {
     return { error: `Say who the message is for. Running now: ${named}.` };
   }
-  const exact = others.filter((r) => r.address.toLowerCase() === want || r.id.toLowerCase() === want);
-  const short = others.filter((r) => r.profile.toLowerCase() === want || r.address.toLowerCase().split("/")[1] === want);
+  // A session's addresses: the one it goes by now, and the folder one it started with (`alias`),
+  // so a message sent to the address it had before its title came still reaches it.
+  const addresses = (r) => [r.address, r.alias].filter((a) => typeof a === "string" && a !== "").map((a) => a.toLowerCase());
+  const exact = others.filter((r) => addresses(r).includes(want) || r.id.toLowerCase() === want);
+  const short = others.filter((r) => r.profile.toLowerCase() === want || addresses(r).some((a) => a.split("/")[1] === want));
   const titled = others.filter((r) => plain(r.title) !== "" && plain(r.title) === plain(want));
   const hits = [exact, short, titled].find((h) => h.length > 0) ?? [];
   if (hits.length === 1) {

@@ -784,7 +784,8 @@ async function startUp($) {
   const profile = profileName(given, config, $.plugin.root);
   const id = await $.session.id();
   const cwd = await $.session.cwd();
-  me = { id, profile, address: addressOf(profile, cwd, id), cwd, startedAt: await $.clock.now(), title: "" };
+  const alias = addressOf(profile, cwd, id);
+  me = { id, profile, address: alias, alias, cwd, startedAt: await $.clock.now(), title: "" };
   titling = await titleSources($, profile, config || `${home}/.claude`, id, cwd);
   delivered = new Set(await readJson($, `${root}/inbox/${id}/_delivered.json`, []));
   await beat($);
@@ -825,6 +826,8 @@ async function startUp($) {
 async function beat($, extra = {}) {
   if (!extra.endedAt) {
     me.title = (await currentTitle($).catch(() => "")) || me.title;
+    // The address follows the title, so it reads as the name the person sees.
+    me.address = addressOf(me.profile, me.cwd, me.id, me.title);
   }
   await $.fs.write(`${root}/sessions/${me.id}.json`, JSON.stringify({ ...me, seenAt: await $.clock.now(), ...extra }));
 }

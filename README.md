@@ -91,15 +91,15 @@ Every message that arrives is also shown to you in the transcript, as `Crosstalk
 Each session is listed by the name you see for it, with its address:
 
 ```
-You are Crosstalk: name sessions by their app title (default/zen-ptolemy-3331a7-0850).
+You are Crosstalk: name sessions by their app title (default/crosstalk-name-sessions-by-their-0850).
 Also running:
-Claude Fuuk for next task (default/claude-fuuk-next-task-b128f8-730f, folder C:\code\cc-consent-forms)
-Review the PR (work/my-app-1a2b, folder C:\code\my-app)
+Claude Fuuk for next task (default/claude-fuuk-for-next-task-730f, folder C:\code\cc-consent-forms)
+Review the PR (work/review-the-pr-1a2b, folder C:\code\my-app)
 ```
 
-**The name** is the session's title. A session in the Claude desktop app goes by its title in the app's sidebar. Crosstalk reads it from the app's own record of the session, in the data folder of the app copy that started it, so a second copy of the app (started with `--user-data-dir`, say for another account) works too. A session in a terminal goes by the title Claude Code gave it, or the one you set with `/rename`. Titles change as a session runs (the app names a session after its first message), so each session checks its own about every 15 seconds. A session with no title yet is listed by its address alone. Messages show the sender's name too: `Crosstalk ← Claude Fuuk for next task (default/claude-fuuk-next-task-b128f8-730f)`.
+**The name** is the session's title. A session in the Claude desktop app goes by its title in the app's sidebar. Crosstalk reads it from the app's own record of the session, in the data folder of the app copy that started it, so a second copy of the app (started with `--user-data-dir`, say for another account) works too. A session in a terminal goes by the title Claude Code gave it, or the one you set with `/rename`. Titles change as a session runs (the app names a session after its first message), so each session checks its own about every 15 seconds. A session with no title yet is listed by its address alone. Messages show the sender's name too: `Crosstalk ← Claude Fuuk for next task (default/claude-fuuk-for-next-task-730f)`.
 
-**The address** looks like `profile/folder-xxxx`, such as `work/my-app-1a2b`, and stays the same for the whole session. To send a message, use the address, the profile name alone when that profile has one session running, or the session's title when only one session has it ("send Claude Fuuk for next task a message").
+**The address** is made from the title, `profile/title-xxxx`, such as `work/review-the-pr-1a2b`, so it reads as the name you see. Until a session has a title it goes by its folder, `work/my-app-1a2b`, and it keeps answering to that folder address after its title comes, so a message sent to it still arrives. To send a message, use the address, the profile name alone when that profile has one session running, or the session's title when only one session has it ("send Claude Fuuk for next task a message").
 
 ### Opening a session in VS Code or VSCodium
 

@@ -33,6 +33,24 @@ test('an address is readable and carries the session', async () => {
   expect(addressOf('work', 'C:\\code\\My Web_App', 'ab12-cd34')).toBe('work/my-web-app-ab12')
 })
 
+test('an address goes by the session title once it has one, else its folder', async () => {
+  expect(addressOf('default', 'C:\\scratch\\scratch-2026-11-09-641b34', '3071f301', 'Claude code mod fix')).toBe('default/claude-code-mod-fix-3071')
+  expect(addressOf('work', 'C:\\code\\proj', 'ab12', '  ')).toBe('work/proj-ab12')
+  expect(addressOf('work', 'C:\\code\\proj', 'ab12', '✨ !!')).toBe('work/proj-ab12')
+  // cut at 32 characters, with no dash left hanging at the cut
+  expect(addressOf('work', 'x', 'ab12', 'Build listing ingest + value model for the shop')).toBe('work/build-listing-ingest-value-model-ab12')
+  expect(addressOf('work', 'x', 'ab12', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa b')).toBe('work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ab12')
+})
+
+test('a session is still reached at the folder address it had before its title came', async () => {
+  const titled = { ...rec('p1', 'personal', 'personal/fix-the-login-b-2'), alias: 'personal/b-2' }
+  const all = [rec('me', 'work', 'work/a-1'), titled]
+  expect(resolveTarget('personal/fix-the-login-b-2', all, 'me', NOW).record?.id).toBe('p1')
+  expect(resolveTarget('personal/b-2', all, 'me', NOW).record?.id).toBe('p1')
+  expect(resolveTarget('b-2', all, 'me', NOW).record?.id).toBe('p1')
+  expect(resolveTarget('fix-the-login-b-2', all, 'me', NOW).record?.id).toBe('p1')
+})
+
 test('a session stops being live when it ends or goes quiet', async () => {
   expect(isLive({ seenAt: NOW }, NOW + LIVE_MS - 1)).toBe(true)
   expect(isLive({ seenAt: NOW }, NOW + LIVE_MS)).toBe(false)
@@ -781,22 +799,25 @@ test('a desktop-app session goes by its app title, read from its own app copy, a
   await $.session.start(START)
   const mine = () => JSON.parse(files.get(`${BOX}/sessions/self-1.json`)!)
   expect(mine().title).toBe('New session')
-  expect(mine().address).toBe('work/proj-self') // the address stays
+  // the address follows the title, and the folder one is kept as its alias
+  expect(mine().address).toBe('work/new-session-self')
+  expect(mine().alias).toBe('work/proj-self')
 
   files.set(`${APP}/claude-code-sessions/acct/org/local_abc-1.json`, appFile('Claude Fuuk for next task'))
   files.beat()
   await settle()
   expect(mine().title).toBe('Claude Fuuk for next task')
+  expect(mine().address).toBe('work/claude-fuuk-for-next-task-self')
 
   files.set(`${BOX}/sessions/other.json`, JSON.stringify({ id: 'other', profile: 'personal', address: 'personal/x-oth', cwd: 'C:/y', seenAt: NOW, title: 'Tidy the docs' }))
   const listed: any = await $.tool.call({ tool: 'mcp__crosstalk__list' } as never)
-  expect(JSON.stringify(listed)).toMatch(/You are Claude Fuuk for next task \(work\/proj-self\)/)
+  expect(JSON.stringify(listed)).toMatch(/You are Claude Fuuk for next task \(work\/claude-fuuk-for-next-task-self\)/)
   expect(JSON.stringify(listed)).toMatch(/Tidy the docs \(personal\/x-oth, folder C:\/y\)/)
 
   const sent: any = await $.tool.call({ tool: 'mcp__crosstalk__send', to: 'tidy the docs', text: 'hi' } as never)
   expect(JSON.stringify(sent)).toMatch(/Sent to Tidy the docs \(personal\/x-oth\)/)
   const written = [...files.keys()].find((k) => k.startsWith(`${BOX}/inbox/other/`))!
-  expect(JSON.parse(files.get(written)!)).toMatchObject({ from: 'work/proj-self', fromTitle: 'Claude Fuuk for next task' })
+  expect(JSON.parse(files.get(written)!)).toMatchObject({ from: 'work/claude-fuuk-for-next-task-self', fromTitle: 'Claude Fuuk for next task' })
 })
 
 test('without the account variables the app file is looked for in each account folder', async ($, on) => {
