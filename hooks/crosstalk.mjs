@@ -21,7 +21,7 @@ import {
   LINUX_TERMINALS, appDataFolders, appTitle, HOST_SESSION, labelOf, listLine, projectFolderName, transcriptTitle,
   choiceLabel, chosenProfile, COMPACT_INSTRUCTIONS, flagApplies, flagEnds, handoffName, handoffText, isOver, isPaused, LARGE_CONTEXT, LARGE_STOP,
   moveChoices, NOT_NOW, parsePercent, pausedNote, resumePrompt, stopLine, stopPoint, stopReason, summaryOf, USAGE_STOP, usagePhrase, windowKey, windowName, worstWindow,
-  chooseOpenProfile, hostWindow, parseParents, PARENTS_SCRIPT, windowNote, profileWord, TOAST_SCHEME,
+  chooseOpenProfile, hostWindow, parseParents, PARENTS_SCRIPT, windowNote, profileWord,
 } from "./core.mjs";
 import {
   configDirsInShell, homeCandidates, isInstalled, isSafeFolder, isSafeName, isUnreadable, looksLikeProfile,
@@ -88,7 +88,7 @@ function freshUsage() {
 // The app window this session runs in (core hostWindow), looked up once at start: a promise of
 // the name, or "" when it isn't in one or can't be told.
 let windowLookup = Promise.resolve("");
-// Window notifications (see notifyWindow): whether the crosstalk-window: link is registered, found
+// Window notifications (see notifyWindow): whether the notification helper is built, found
 // once, and when the last notification was raised, so a prompt and its turn don't double up.
 let linkLookup = null;
 let notifiedAt = 0;
@@ -638,8 +638,8 @@ async function installAppWindows($, pc) {
   const ran = await $.process.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script], { timeoutMs: 60_000 }).catch(() => null);
   linkLookup = null;
   return ran && ran.exitCode === 0
-    ? "Installed the app-window scripts and the notification link (this user only), so notifications from a profile's app window open that window."
-    : `Couldn't install the app-window notification link. Run: powershell -ExecutionPolicy Bypass -File "${script}"`;
+    ? "Installed the app-window scripts and the notification helper (this user only), so notifications from a profile's app window open that window."
+    : `Couldn't install the app-window notification helper. Run: powershell -ExecutionPolicy Bypass -File "${script}"`;
 }
 
 // A new profile, ready to log in to.
@@ -1014,20 +1014,18 @@ async function installHelperNow($, pc, editor) {
   return Boolean(ran && ran.exitCode === 0);
 }
 
-// Whether the crosstalk-window: link is registered for this user (Windows; install.ps1 and
-// /crosstalk setup yes do it).
-async function hasWindowLink($) {
+// Whether the notification helper is built (Windows; install.ps1 and /crosstalk setup yes do it).
+async function hasToastHost($) {
   if (!(await computer($)).isWindows) {
     return false;
   }
-  const ran = await $.process.run(["reg", "query", `HKCU\\Software\\Classes\\${TOAST_SCHEME}`], { timeoutMs: 10_000 }).catch(() => null);
-  return Boolean(ran && ran.exitCode === 0);
+  return $.fs.exists(`${root}/app-windows/ToastHost.exe`).catch(() => false);
 }
 
 // A Windows notification for this session that, clicked, opens its own app window on it. The app's
 // own notifications all belong to one app identity, so a click opens the main window's last
 // session whichever window raised it. Only for a Code-tab session in an account window other than
-// the main one, once the link is registered. Never waits on or fails a turn.
+// the main one, once the helper is built. Never waits on or fails a turn.
 async function notifyWindow($, what) {
   try {
     if (!me || isOff) {
@@ -1042,12 +1040,12 @@ async function notifyWindow($, what) {
     if (now - notifiedAt < NOTIFY_GAP_MS) {
       return;
     }
-    linkLookup ??= hasWindowLink($);
+    linkLookup ??= hasToastHost($);
     if (!(await linkLookup)) {
       return;
     }
     notifiedAt = now;
-    const script = `${$.plugin.root}/app-windows/claude-toast.ps1`;
+    const script = `${root}/app-windows/claude-toast.ps1`;
     const title = String(me.title || me.address).replace(/["\r\n]+/g, " ").slice(0, 80);
     await $.process.run(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script, window, hostId, title, `${window}: ${what}`], { timeoutMs: 30_000 });
   } catch {

@@ -8,7 +8,7 @@ import {
   appDataFolders, appPanelCommand, appTitle, cleanTitle, labelOf, listLine, projectFolderName, transcriptTitle,
   chosenProfile, choiceLabel, flagApplies, flagEnds, FLAG_MS, handoffName, isPaused, moveChoices, NOT_NOW, parsePercent, pausedNote,
   resumePrompt, stopPoint, summaryOf, usagePhrase, worstWindow,
-  appWindowOf, chooseOpenProfile, hostWindow, parseParents, windowNote, parseToastLink, profileWord, toastLink,
+  appWindowOf, chooseOpenProfile, hostWindow, parseParents, windowNote, profileWord,
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -1223,16 +1223,9 @@ test('outside the app no process walk runs, and "window" says it can\'t tell', a
 
 // ---- Open where you are, shorter commands, notifications that open their own window ----
 
-test('a profile is told as people say it, and a notification link only takes plain names', async () => {
+test('a profile is told as people say it, and open takes --in', async () => {
   expect(['fuuk', 'claude-fuuk', 'claude fuuk', 'the fuuk app', 'my Work account', 'claude', 'main'].map(profileWord))
     .toEqual(['fuuk', 'fuuk', 'fuuk', 'fuuk', 'work', 'default', 'default'])
-  const link = toastLink('fuuk', 'local_ab-12')
-  expect(parseToastLink(link)).toEqual({ window: 'fuuk', session: 'local_ab-12' })
-  // Windows hands the handler the link with a slash after the host.
-  expect(parseToastLink('crosstalk-window://open/?window=fuuk&session=local_ab-12')).toEqual({ window: 'fuuk', session: 'local_ab-12' })
-  expect(parseToastLink('crosstalk-window://open?window=../x&session=local_1')).toBe(null)
-  expect(parseToastLink('crosstalk-window://open?window=fuuk&session=local_1&q=calc')).toBe(null)
-  expect(parseToastLink('claude://code/new?folder=x')).toBe(null)
   expect(parseOpenArgs(['claude', 'fuuk', '--in', 'window', 'hi'])).toMatchObject({ profile: 'claude-fuuk', openIn: 'window', message: 'hi' })
   expect(parseOpenArgs(['fuuk', '--in', 'nowhere']).error).toMatch(/--in takes/)
   expect(chooseOpenIn('panel', undefined, '', false, 'VS Code', true)).toEqual({ where: 'panel' })
@@ -1240,15 +1233,15 @@ test('a profile is told as people say it, and a notification link only takes pla
 })
 
 // A mikey session in the app, with fuuk's app window on disk and the plugin's scripts in place.
-function inAppWindows(on: any, extraEnv: Record<string, string> = {}, regFails = false) {
+function inAppWindows(on: any, extraEnv: Record<string, string> = {}, hasHost = false) {
   const calls: any[] = []
   const typed: any[] = []
   const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-mikey', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', ...extraEnv }, (e: any) => {
     calls.push(e.argv)
     if (e.argv[0] === 'powershell.exe' && e.argv.includes('-Command')) return { ...RAN_OK, stdout: IN_FUUK }
-    if (e.argv[0] === 'reg' && regFails) return { ...RAN_OK, exitCode: 1 }
     return RAN_OK
   })
+  if (hasHost) files.set(`${BOX}/app-windows/ToastHost.exe`, '')
   on('tool.call', { tool: 'mcp__terminal__run_in_terminal' }, (_: any, e: any) => { typed.push(e); return { result: [{ type: 'text', text: 'Started' }] } })
   on('clock.sleep', () => ({ value: undefined }))
   files.set('C:/home/.claude-fuuk-app/Preferences', '{}')
@@ -1313,8 +1306,8 @@ test('a profile\'s name works as a command, and to sends without the model', asy
   expect(await say($, '')).toMatch(/\/crosstalk <profile> \[message\]/)
 })
 
-test('a session in an account window raises a notification that opens that window, once the link is registered', async ($, on) => {
-  const { calls } = inAppWindows(on, { CLAUDE_CODE_HOST_SESSION_ID: 'local_abc-123' })
+test('a session in an account window raises a notification that opens that window, once the helper is built', async ($, on) => {
+  const { calls } = inAppWindows(on, { CLAUDE_CODE_HOST_SESSION_ID: 'local_abc-123' }, true)
   on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: 'done' }))
   await $.session.start(START)
@@ -1325,12 +1318,11 @@ test('a session in an account window raises a notification that opens that windo
   const toast = calls.find((a) => a.includes('-File') && /claude-toast\.ps1$/.test(a[a.indexOf('-File') + 1]))!
   expect(toast.slice(toast.indexOf('-File') + 2, toast.indexOf('-File') + 4)).toEqual(['fuuk', 'local_abc-123'])
   expect(toast.at(-1)).toBe('fuuk: finished')
-  expect(calls.some((a) => a[0] === 'reg' && /crosstalk-window/.test(a[2]))).toBe(true)
+  expect(toast[toast.indexOf('-File') + 1]).toBe(`C:/home/.claude-crosstalk/app-windows/claude-toast.ps1`) // the built copy, not the plugin's
 })
 
-test('no notification without the registered link, outside an account window, or for the main window', async ($, on) => {
-  // The link isn't registered: reg query fails.
-  const first = inAppWindows(on, { CLAUDE_CODE_HOST_SESSION_ID: 'local_abc-123' }, true)
+test('no notification until the helper is built', async ($, on) => {
+  const first = inAppWindows(on, { CLAUDE_CODE_HOST_SESSION_ID: 'local_abc-123' })
   on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: 'done' }))
   await $.session.start(START)

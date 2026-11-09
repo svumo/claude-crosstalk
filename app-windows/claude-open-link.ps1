@@ -23,6 +23,11 @@ if ($Url.Trim() -notmatch '^crosstalk-window://open/?\?window=([A-Za-z0-9][A-Za-
     Write-Error "Not a Crosstalk window link."; exit 1
 }
 $window = $Matches[1].ToLowerInvariant()
+# Only a window that already exists: claude-app.ps1 would start a new, signed-out one for any name.
+if ($window -notin 'default', 'main' -and -not (Test-Path -LiteralPath (Join-Path $env:USERPROFILE ".claude-$window-app") -PathType Container)) {
+    Write-LinkLog "no such window: $window"
+    Write-Error "There is no Claude window for '$window'."; exit 1
+}
 $link = "claude://code/continue?session=$($Matches[2])"
 
 if ($window -in 'default', 'main') {

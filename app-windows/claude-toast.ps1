@@ -1,15 +1,20 @@
 # Shows a Windows notification for a session in an account's Claude window. Clicking it opens that
-# window on that session (claude-open-link.ps1, through the crosstalk-window:// protocol), where the
-# app's own notification would open the main window's last session. Windows PowerShell 5.1 or 7.
+# window on that session (claude-open-link.ps1), where the app's own notification would open the
+# main window's last session. Windows PowerShell 5.1 or 7.
 #   claude-toast.ps1 fuuk local_1234-abcd "Fix the login page" "Needs your approval"
 # Skipped when that window is the one in front. The notification is "Claude (<name>)", a name
-# install.ps1 registers for the window.
+# install.ps1 gives the window.
+#
+# Windows takes a notification back when the program that raised it ends, and a click only reaches
+# that program while it runs. So ToastHost.exe (built by install.ps1) raises it and stays hidden for
+# -WaitMinutes, listening for the click. This script returns at once.
 param(
     [Parameter(Mandatory)][string]$Window,
     [Parameter(Mandatory)][string]$Session,
     [Parameter(Mandatory)][string]$Title,
     [string]$Body = '',
-    [switch]$Force
+    [switch]$Force,
+    [int]$WaitMinutes = 15
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'claude-common.ps1')
@@ -17,6 +22,9 @@ $ErrorActionPreference = 'Stop'
 if ($Window -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,30}$') { Write-Error "Not a window name."; exit 1 }
 if ($Session -notmatch '^local_[A-Za-z0-9-]{1,64}$') { Write-Error "Not an app session id."; exit 1 }
 $Window = $Window.ToLowerInvariant()
+
+$exe = Join-Path $PSScriptRoot 'ToastHost.exe'
+if (-not (Test-Path -LiteralPath $exe)) { Write-Error "ToastHost.exe isn't built here: run install.ps1 (or /crosstalk setup yes)."; exit 1 }
 
 if (-not $Force) {
     Add-Type -Namespace Win32 -Name Fg -MemberDefinition @'
@@ -31,26 +39,11 @@ if (-not $Force) {
     if ($proc -and (Get-CimInstance Win32_Process -Filter "ProcessId=$fgPid" -ErrorAction SilentlyContinue).ParentProcessId -eq $proc.ProcessId) { exit 0 }
 }
 
-$aumid = "Crosstalk.Claude.$Window"
-$key = "HKCU:\Software\Classes\AppUserModelId\$aumid"
-if (-not (Test-Path $key)) {
-    New-Item -Path $key -Force | Out-Null
-    New-ItemProperty -Path $key -Name DisplayName -Value "Claude ($Window)" -Force | Out-Null
-}
+# One notification per session at a time: a new one replaces the older host for that session.
+Get-CimInstance Win32_Process -Filter "Name='ToastHost.exe'" -ErrorAction SilentlyContinue |
+    Where-Object { $_.CommandLine -like "*$Session*" } |
+    ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
-$esc = { param($s) [System.Security.SecurityElement]::Escape($s) }
-$link = "crosstalk-window://open?window=$Window&session=$Session"
-$xml = @"
-<toast activationType="protocol" launch="$(& $esc $link)">
-  <visual><binding template="ToastGeneric">
-    <text>$(& $esc $Title)</text>
-    <text>$(& $esc $Body)</text>
-  </binding></visual>
-</toast>
-"@
-[void][Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
-[void][Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
-$doc = New-Object Windows.Data.Xml.Dom.XmlDocument
-$doc.LoadXml($xml)
-$toast = New-Object Windows.UI.Notifications.ToastNotification $doc
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($aumid).Show($toast)
+$q = { param($s) '"' + ($s -replace '"', "'") + '"' }
+$argList = @($Window, $Session, (& $q $Title), (& $q $Body), "$WaitMinutes", (& $q (Join-Path $PSScriptRoot 'claude-open-link.ps1')))
+Start-Process -FilePath $exe -ArgumentList $argList -WindowStyle Hidden

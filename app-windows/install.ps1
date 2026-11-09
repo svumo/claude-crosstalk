@@ -2,23 +2,30 @@
 #   install.ps1                         copy the scripts, and the skill into every profile
 #   install.ps1 -Shortcuts work,fuuk    also make a Start-menu shortcut "Claude (<name>)" for each
 #   install.ps1 -WhatIf                 only say what it would do
+#   install.ps1 -Uninstall              remove the notification names Crosstalk registered
 # The scripts go to Crosstalk's shared folder (CLAUDE_CROSSTALK_DIR, default ~\.claude-crosstalk)
 # under app-windows\, so every profile finds them in one place that doesn't move when Crosstalk
 # updates. A profile is ~\.claude or ~\.claude-<name> that holds Claude Code's files.
+#
+# Notifications that open the right window: for each app window (~\.claude-<name>-app) it builds
+# ToastHost.exe with the csc.exe that comes with Windows, gives the window a notification name
+# ("Claude (<name>)", on the Start-menu shortcut of that name), and removes nothing else.
 [CmdletBinding(SupportsShouldProcess)]
 param([string[]]$Shortcuts = @(), [switch]$Uninstall, [switch]$NoLink)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'claude-common.ps1')
 
 $dest = Join-Path (Get-CrosstalkDir) 'app-windows'
-$scripts = 'claude-common.ps1', 'claude-app.ps1', 'claude-new-session.ps1', 'claude-press-send.ps1', 'claude-open-link.ps1', 'claude-toast.ps1'
+$scripts = 'claude-common.ps1', 'claude-app.ps1', 'claude-new-session.ps1', 'claude-press-send.ps1', 'claude-open-link.ps1', 'claude-toast.ps1', 'ToastHost.cs'
 
-# Notifications that open the right window: the crosstalk-window: link, and a name per window.
-$protocol = 'HKCU:\Software\Classes\crosstalk-window'
+# What an earlier build registered (a crosstalk-window: link) is not used any more.
+$old = 'HKCU:\Software\Classes\crosstalk-window', 'HKCU:\Software\Classes\Crosstalk.WindowLink', 'HKCU:\Software\Crosstalk'
 if ($Uninstall) {
-    foreach ($k in $protocol, 'HKCU:\Software\Classes\AppUserModelId\Crosstalk.Claude.*') {
+    foreach ($k in $old + 'HKCU:\Software\Classes\AppUserModelId\Crosstalk.Claude.*') {
         if (Test-Path $k) { if ($PSCmdlet.ShouldProcess($k, 'Remove')) { Remove-Item -Path $k -Recurse -Force; "Removed $k" } }
     }
+    $ra = 'HKCU:\Software\RegisteredApplications'
+    if ((Get-ItemProperty $ra -ErrorAction SilentlyContinue).Crosstalk) { Remove-ItemProperty -Path $ra -Name Crosstalk; "Removed RegisteredApplications\Crosstalk" }
     return
 }
 
@@ -26,19 +33,21 @@ if ($PSCmdlet.ShouldProcess($dest, 'Copy the app-windows scripts')) {
     New-Item -ItemType Directory -Force $dest | Out-Null
     foreach ($s in $scripts) {
         Copy-Item -LiteralPath (Join-Path $PSScriptRoot $s) -Destination $dest -Force
-        Unblock-File -LiteralPath (Join-Path $dest $s)
+        if ($s -like '*.ps1') { Unblock-File -LiteralPath (Join-Path $dest $s) }
     }
     "Scripts: $dest"
 }
 
-if (-not $NoLink -and $PSCmdlet.ShouldProcess($protocol, 'Register the crosstalk-window: link that notifications use')) {
-    $open = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $dest 'claude-open-link.ps1')`" `"%1`""
-    New-Item -Path "$protocol\shell\open\command" -Force | Out-Null
-    Set-ItemProperty -Path $protocol -Name '(default)' -Value 'URL:Crosstalk window'
-    New-ItemProperty -Path $protocol -Name 'URL Protocol' -Value '' -Force | Out-Null
-    Set-ItemProperty -Path "$protocol\shell\open\command" -Name '(default)' -Value $open
-    # A name for each window's notifications, made now so the first one already shows it.
+if (-not $NoLink -and $PSCmdlet.ShouldProcess($dest, 'Set up notifications that open the right window')) {
+    foreach ($k in $old) { if (Test-Path $k) { Remove-Item -Path $k -Recurse -Force } }
+    $ra = 'HKCU:\Software\RegisteredApplications'
+    if ((Get-ItemProperty $ra -ErrorAction SilentlyContinue).Crosstalk) { Remove-ItemProperty -Path $ra -Name Crosstalk }
+
+    $built = Build-ToastHost (Join-Path $dest 'ToastHost.cs') (Join-Path $dest 'ToastHost.exe')
+    if ($built) { "Built: $(Join-Path $dest 'ToastHost.exe')" } else { Write-Warning "Couldn't build ToastHost.exe (csc.exe not found), so notifications from a profile's window won't open that window." }
+
     $exe = Find-ClaudeExe
+    $menu = [Environment]::GetFolderPath('Programs')
     foreach ($d in Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Force | Where-Object { $_.Name -match '^\.claude-(.+)-app$' }) {
         $win = ($d.Name -replace '^\.claude-', '' -replace '-app$', '').ToLowerInvariant()
         if ($win -notmatch '^[a-z0-9][a-z0-9_-]{0,30}$') { continue }
@@ -46,12 +55,21 @@ if (-not $NoLink -and $PSCmdlet.ShouldProcess($protocol, 'Register the crosstalk
         New-Item -Path $k -Force | Out-Null
         New-ItemProperty -Path $k -Name DisplayName -Value "Claude ($win)" -Force | Out-Null
         if ($exe) { New-ItemProperty -Path $k -Name IconUri -Value $exe -Force | Out-Null }
+        # The Start-menu shortcut "Claude (<win>)" carries that identity.
+        $lnk = Join-Path $menu "Claude ($win).lnk"
+        if (-not (Test-Path -LiteralPath $lnk)) {
+            $shellExe = (Get-Command pwsh.exe -ErrorAction SilentlyContinue).Source
+            if (-not $shellExe) { $shellExe = (Get-Command powershell.exe).Source }
+            $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+            $sc.TargetPath = $shellExe
+            $sc.Arguments = "-NoProfile -WindowStyle Hidden -File `"$(Join-Path $dest 'claude-app.ps1')`" $win"
+            if ($exe) { $sc.IconLocation = "$exe,0" }
+            $sc.Save()
+            "Shortcut: $lnk"
+        }
+        Set-ShortcutAppId $lnk "Crosstalk.Claude.$win"
+        "Notifications: $win"
     }
-    # Tell the shell a link handler changed, so it that is already running (it shows the
-    # notifications) doesn't go on answering "no app for this link".
-    Add-Type -Namespace Xt -Name Shell -MemberDefinition '[System.Runtime.InteropServices.DllImport("shell32.dll")] public static extern void SHChangeNotify(int eventId, uint flags, System.IntPtr a, System.IntPtr b);'
-    [Xt.Shell]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)
-    "Link: crosstalk-window: (this user only)"
 }
 
 # The same rule as Crosstalk's setup (hooks/setup.mjs): .claude or .claude-<name>, not Crosstalk's

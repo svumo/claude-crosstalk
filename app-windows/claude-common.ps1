@@ -84,3 +84,66 @@ function Get-CrosstalkDir {
     if ($env:CLAUDE_CROSSTALK_DIR) { return $env:CLAUDE_CROSSTALK_DIR }
     return Join-Path $env:USERPROFILE '.claude-crosstalk'
 }
+
+# Builds ToastHost.exe from its source with the C# compiler that comes with Windows (.NET
+# Framework's csc.exe). $true when the program is there afterwards.
+function Build-ToastHost([string]$Source, [string]$Output) {
+    $fw = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319'
+    $csc = Join-Path $fw 'csc.exe'
+    $wm = Join-Path $env:WINDIR 'System32\WinMetadata'
+    if (-not (Test-Path -LiteralPath $csc)) { return (Test-Path -LiteralPath $Output) }
+    $refs = "$wm\Windows.UI.winmd", "$wm\Windows.Data.winmd", "$wm\Windows.Foundation.winmd",
+        "$fw\System.Runtime.WindowsRuntime.dll", "$fw\System.Runtime.dll", "$fw\System.Runtime.InteropServices.WindowsRuntime.dll"
+    # A running copy locks the file; the ones waiting on a notification are ended first.
+    Get-Process ToastHost -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $Output } | Stop-Process -Force -ErrorAction SilentlyContinue
+    $out = & $csc /nologo /target:winexe "/out:$Output" ($refs | ForEach-Object { "/r:$_" }) $Source 2>&1
+    if ($LASTEXITCODE -ne 0) { Write-Warning ($out | Out-String) }
+    return (Test-Path -LiteralPath $Output)
+}
+
+# Gives a Start-menu shortcut an app identity (System.AppUserModel.ID). A notification keeps showing
+# after the process that raised it ends, and a click on it works, only for an identity that has such
+# a shortcut; one that only has a registry name is cleared when its process exits.
+function Set-ShortcutAppId([string]$Shortcut, [string]$AppId) {
+    if (-not ('Xt.AppIdLink' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace Xt {
+    [ComImport, Guid("00021401-0000-0000-C000-000000000046")] class CShellLink { }
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("0000010b-0000-0000-C000-000000000046")]
+    interface IPersistFile {
+        void GetClassID(out Guid g);
+        [PreserveSig] int IsDirty();
+        void Load([MarshalAs(UnmanagedType.LPWStr)] string file, uint mode);
+        void Save([MarshalAs(UnmanagedType.LPWStr)] string file, [MarshalAs(UnmanagedType.Bool)] bool remember);
+        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string file);
+        void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string file);
+    }
+    [StructLayout(LayoutKind.Sequential, Pack = 4)] struct PropertyKey { public Guid fmtid; public uint pid; }
+    [StructLayout(LayoutKind.Sequential)] struct PropVariant { public ushort vt; public ushort r1, r2, r3; public IntPtr p; public IntPtr p2; }
+    [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
+    interface IPropertyStore {
+        uint GetCount();
+        void GetAt(uint i, out PropertyKey k);
+        void GetValue(ref PropertyKey k, out PropVariant v);
+        void SetValue(ref PropertyKey k, ref PropVariant v);
+        void Commit();
+    }
+    public static class AppIdLink {
+        public static void Set(string path, string appId) {
+            object link = new CShellLink();
+            ((IPersistFile)link).Load(path, 2);
+            var store = (IPropertyStore)link;
+            var key = new PropertyKey { fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"), pid = 5 };
+            var v = new PropVariant { vt = 31, p = Marshal.StringToCoTaskMemUni(appId) };
+            store.SetValue(ref key, ref v);
+            store.Commit();
+            ((IPersistFile)link).Save(path, true);
+        }
+    }
+}
+'@
+    }
+    [Xt.AppIdLink]::Set($Shortcut, $AppId)
+}

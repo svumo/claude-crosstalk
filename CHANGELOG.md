@@ -1,9 +1,14 @@
 # Changelog
 
+## 1.8.2
+
+- **Notification clicks work.** Windows would not run a custom link when a notification was clicked ("Get an app to open this link"), and removes a notification when the program that raised it ends. So the notification is now raised by `ToastHost.exe`, a small program `install.ps1` builds with the C# compiler that comes with Windows. It stays hidden for 15 minutes, hears the click itself, and opens that window on that session. No link or default-app entry is registered any more, and `install.ps1` removes the ones an earlier build made.
+- The click handler (`claude-open-link.ps1`) only opens a window that already exists, so it can't start a new signed-out one, and logs each click to `open-link.log` in Crosstalk's folder.
+
 ## 1.8.1
 
 - A session the app started ahead of time (a "spare") runs in a temporary folder that the app deletes once the session is in use. `open` now opens in the project folder from the session's app record instead, so it no longer fails with "No such folder: ...\spares\spare-...". If the project folder can't be found it says so.
-- `install.ps1` tells the shell a link handler changed and makes each window's notification name up front, so the first notification already says "Claude (mikey)" and a click finds the `crosstalk-window:` handler.
+- Each window's notification name ("Claude (mikey)") is set up front, on the Start-menu shortcut of that name.
 
 ## 1.8.0
 
@@ -18,7 +23,7 @@
 
 **Notifications that open the right window (Windows)**
 - A session in an account's app window (not the main one) now raises its own notification when a turn finishes, or when it needs a permission, answers a question or approves a plan. Clicking it opens that window on that session. The app's own notifications all belong to one app identity, so a click always went to the main window's last session.
-- `/crosstalk setup yes` (or `app-windows\install.ps1`) installs it for this user only: a `crosstalk-window:` link and a notification name per window. `install.ps1 -Uninstall` removes it. The link only accepts a plain window name and an app session id.
+- `/crosstalk setup yes` (or `app-windows\install.ps1`) installs it for this user only: a notification helper and a notification name per window. `install.ps1 -Uninstall` removes the names.
 - To avoid doubles, turn off "task complete" and set permission and question notifications to badge in each account window's own Settings. The main window keeps its own.
 
 **Sessions know their window, and `open` needs no profile**

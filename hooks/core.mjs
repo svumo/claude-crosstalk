@@ -490,19 +490,6 @@ export function profileWord(text) {
   return name === "main" ? "default" : name.replace(/^claude-/, "");
 }
 
-// The link a notification carries so a click opens the window the session runs in, on that session:
-// crosstalk-window://open?window=<profile>&session=<local id>. Only a plain profile name and an
-// app session id are taken, the same shapes the app's own links accept.
-export const TOAST_SCHEME = "crosstalk-window";
-export function toastLink(window, hostId) {
-  return `${TOAST_SCHEME}://open?window=${encodeURIComponent(window)}&session=${encodeURIComponent(hostId)}`;
-}
-
-export function parseToastLink(url) {
-  const m = /^crosstalk-window:\/\/open\/?\?window=([A-Za-z0-9][A-Za-z0-9_-]{0,30})&session=(local_[A-Za-z0-9-]{1,64})\/?$/.exec(String(url ?? "").trim());
-  return m ? { window: m[1].toLowerCase(), session: m[2] } : null;
-}
-
 // Words that mean "the same as this session" where open takes a profile: none at all, or one of these.
 export const HERE_WORDS = ["", "here", "same", "this", "self", "me", "mine"];
 // The word that means "the account of the app window I'm looking at".

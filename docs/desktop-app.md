@@ -25,7 +25,7 @@ On Windows, a session in the app opens other profiles **in their own app window*
 
 ## Notifications that open the right window
 
-The app's notifications all belong to one app identity, so on Windows clicking one opens the main window's last session, whichever window raised it. For sessions in an account window, Crosstalk raises its own notification (finished, needs approval, has a question, has a plan). Clicking it opens that window on that session. `/crosstalk setup yes` installs it for this user only, and `app-windows\install.ps1 -Uninstall` removes it. To avoid doubles, set that window's own notification settings to off or badge. The main window keeps the app's own.
+The app's notifications all belong to one app identity, so on Windows clicking one opens the main window's last session, whichever window raised it. For sessions in an account window, Crosstalk raises its own notification (finished, needs approval, has a question, has a plan). Clicking it opens that window on that session. `/crosstalk setup yes` installs it for this user only: it builds a small helper program (`ToastHost.exe`, with the C# compiler that comes with Windows) that stays hidden for 15 minutes per notification to hear the click. `app-windows\install.ps1 -Uninstall` removes the notification names. Each click is logged in `open-link.log` in Crosstalk's folder. To avoid doubles, set that window's own notification settings to off or badge. The main window keeps the app's own.
 
 ## A. Terminal-panel tab (no extra setup)
 
