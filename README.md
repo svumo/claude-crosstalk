@@ -83,6 +83,11 @@ Just ask, in plain words:
 | `/crosstalk open-in auto\|app\|vscode\|window` | Where `open` starts it. `auto` is a tab in the Claude desktop app's Terminal panel when you're in the app, an editor tab when you're in VS Code or VSCodium, else a new window. On its own, `/crosstalk open-in` says what `open` will do from this session and why |
 | `/crosstalk editor auto\|code\|codium` | Which editor the tab opens in. `auto` spots VS Code or VSCodium from the terminal this session runs in |
 | `/crosstalk launch <profile> <command>` | The command that starts a profile, such as `claude zai`. Default: `claude-<profile>` |
+| `/crosstalk usage` | Each account's last known usage, and where this session stops and why (see Usage guard) |
+| `/crosstalk usage <1-100\|off>` | Where every session on an account stops. Default: 93 |
+| `/crosstalk usage here <1-100\|off>` | This session alone stops earlier, such as 80 for a big session |
+| `/crosstalk usage large <1-100\|off> [context %]` | Where a session with a full context stops. Default: 85 once its context is 60% full |
+| `/crosstalk move <profile>` | Hands this session to another account now: compacts it, writes a handoff and opens the profile on it |
 
 Every message that arrives is also shown to you in the transcript, as `Crosstalk ← sender`, so you don't have to ask whether anyone replied.
 
@@ -254,7 +259,37 @@ Each session records that it's running and checks its own inbox. When a message 
 - **If it's working,** the model reads the message on its next step, once the current tool calls finish.
 - **If it's in one long step with no tools,** the message arrives when that turn ends.
 
+## Usage guard
+
+When an account gets close to its usage limit, every session on it would otherwise keep going until it hits the limit mid-task. Crosstalk stops them first, at 93% of any limit (the 5-hour or weekly window, or a gateway spend limit). It never triggers on an API key or a non-Claude provider, since those report no limits.
+
+For each session on that account, Crosstalk:
+
+1. Holds its wake-ups, so no message starts a turn while it's over the limit. Messages wait in its inbox.
+2. Stops the turn it's running, if any.
+3. Compacts it, as `/compact` does, asking for a summary written as a handoff.
+4. Writes that summary to `handoffs/<date>-<address>.md` in the shared folder, with the folder, the account and the transcript path, and shows it in the transcript. A desktop notification goes out too.
+5. Asks whether to move the session to another account. It offers up to three other profiles, lowest known usage first, plus "Not now". You can also type any profile name. If you pick one, that profile opens in the same folder and is told to read the handoff and carry on.
+
+The first session to see 93% writes `usage/<profile>.json` to the shared folder. Every other session on that profile, or on the same account under another profile name, checks for it every 3 seconds, so idle sessions stop too. Each session acts once per window. "Not now" holds until the window resets.
+
+**Moving big sessions earlier.** A session with a lot of context needs room to compact and hand off, so it stops before the rest:
+
+- A session whose context is 60% full or more stops at 85%. Change it with `/crosstalk usage large <n> [context %]`, or turn it off with `off`.
+- `/crosstalk usage here 80` stops this one session at 80%. It's kept in the session's record, so it survives a reload.
+- `/crosstalk move <profile>` moves a session right away, at any usage.
+
+A session that stops early stops alone. It doesn't tell the rest of the account to stop.
+
+**Who reports back to whom.** A moved session is told whether to report back:
+
+- If the old session stopped near its limit (the guard's own move, or `/crosstalk move` while over), the new one is told it owns the work alone. It shouldn't message the old one, which is paused and may not have enough usage left to answer, and it should ask you in its own chat if it gets stuck.
+- If the old session still has plenty of usage (a `/crosstalk move` well under the limit), the new one messages it only if it gets blocked or when it's done.
+- The `send` tool still delivers a message to a session that's paused for usage. Its reply says that session won't answer before its limit resets and suggests asking you instead. `list` marks such sessions "paused near its usage limit", and its first line shows this session's own usage. The `move-chat` skill uses that line to choose the same wording.
+
 ## Costs and safety
+
+- **The usage guard costs a little.** Compacting a stopped session makes one summary request on that account, using some of the last 7%.
 
 - **Wake-ups use tokens.** Each message that wakes a session uses that profile's tokens or usage. After 25 wake-ups in a row, new messages wait until you type, so two sessions can't keep replying to each other forever. To change the number, set `CLAUDE_CROSSTALK_WAKE_LIMIT`.
 - **Messages are plain text on disk,** so don't send passwords or keys.
@@ -300,8 +335,9 @@ Optional environment variables, set before you start a session:
 | `CLAUDE_CROSSTALK_EDITOR` | Which editor `open` uses for the new terminal tab (`code` or `codium`), over `/crosstalk editor` and spotting it | `auto` |
 | `CLAUDE_CROSSTALK_TERMINAL` | On Linux, the terminal `open` tries first, such as `kitty` or `tmux` | The first one found |
 | `CLAUDE_CROSSTALK_APP_DATA` | The Claude desktop app's data folder, if a desktop-app session's title isn't found where Crosstalk looks | The app copy that started the session, `~/.claude-<profile>-app`, then the standard folders |
+| `CLAUDE_CROSSTALK_USAGE_STOP` | Where sessions stop near a usage limit (1-100, or `off`), over `/crosstalk usage` | 93 |
 
-`/crosstalk open-in`, `/crosstalk editor` and `/crosstalk launch` save their settings in `setup.json` in the shared folder, so every profile uses them.
+`/crosstalk open-in`, `/crosstalk editor`, `/crosstalk launch` and `/crosstalk usage` save their settings in `setup.json` in the shared folder, so every profile uses them.
 
 ## Tested on
 

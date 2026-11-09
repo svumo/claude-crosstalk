@@ -33,10 +33,15 @@ Point to files and commits by path instead of copying them in. Leave secrets out
 
 Pick the folder: the project's main checkout, so the app files the session under the same project in its sidebar. Use a worktree of this session only if the work lives only on that worktree's branch. In that case, name the branch in the handoff and still use the main checkout.
 
+Pick the last sentence of the prompt (`<report line>` below):
+
+- **This session is near its limit**: crosstalk `list`'s first line says "over its stop point", the user says a usage limit is close, or the guard stopped this chat. Use: `You own this work alone: don't message <this session's crosstalk address>, as it is paused near its usage limit; if you're blocked, ask the user in your own chat.` A report back would land on a session that can't answer, or spend what usage it has left.
+- **Otherwise** (plenty of usage left): `Message <this session's crosstalk address> over crosstalk only if you're blocked or when done.`
+
 Run this in PowerShell, as one line:
 
 ```
-& "<xt>\app-windows\claude-new-session.ps1" <profile> "<folder>" "Resume from a handoff: read <full handoff path> first, then carry on with its next steps. Message <this session's crosstalk address> over crosstalk only if you're blocked or when done." -Send
+& "<xt>\app-windows\claude-new-session.ps1" <profile> "<folder>" "Resume from a handoff: read <full handoff path> first, then carry on with its next steps. <report line>" -Send
 ```
 
 - `<profile>` is the Crosstalk profile name, or `default` for the main window.
@@ -47,7 +52,7 @@ Run this in PowerShell, as one line:
 
 ## 3. Check it started
 
-Run crosstalk `list` once. The new session shows up by its title, with an address like `<profile>/<title>-xxxx`. Don't poll: its message arrives here by itself if it gets blocked or finishes.
+Run crosstalk `list` once. The new session shows up by its title, with an address like `<profile>/<title>-xxxx`. Don't poll: its message arrives here by itself if it gets blocked or finishes, unless it was told to work alone.
 
 ## 4. Tell the user (3 lines)
 
