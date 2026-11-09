@@ -62,7 +62,14 @@ export function labelOf(record) {
 // One session in `list`: its title first when it has one, then its address and folder.
 export function listLine(record) {
   const title = cleanTitle(record?.title);
-  return title ? `${title} (${record.address}, folder ${record.cwd})` : `${record.address} (folder ${record.cwd})`;
+  const where = `folder ${record.cwd}${windowNote(record)}`;
+  return title ? `${title} (${record.address}, ${where})` : `${record.address} (${where})`;
+}
+
+// ", in the fuuk app window" for a session known to run in one, else "".
+export function windowNote(record) {
+  const name = clean(record?.window);
+  return name ? `, in the ${name} app window` : "";
 }
 
 // The desktop app keeps one file per session, <user data>/claude-code-sessions/<account>/<org>/
@@ -145,12 +152,14 @@ const plain = (text) => cleanTitle(text).toLowerCase().replace(/["'“”‘’]
 // Who `to` means among the live sessions, leaving out the sender: a whole address, the part
 // after the profile, a session id, a profile with exactly one session running, or a session's
 // title (quotes and case aside). Returns { record } or { error }, the error naming who there is.
-export function resolveTarget(to, records, selfId, now) {
+// With `selfProfile` given, no one named (or "another"/"different") means a session on the sender's
+// own profile: see pickSession. Anything that names a session, even one called "other", wins.
+export function resolveTarget(to, records, selfId, now, selfProfile) {
   const want = String(to ?? "").trim().toLowerCase();
   const others = records.filter((r) => r.id !== selfId && isLive(r, now));
   const named = others.map(labelOf).join(", ") || "none";
   if (want === "") {
-    return { error: `Say who the message is for. Running now: ${named}.` };
+    return selfProfile ? pickSession(others, selfProfile) : { error: `Say who the message is for. Running now: ${named}.` };
   }
   // A session's addresses: the one it goes by now, and the folder one it started with (`alias`),
   // so a message sent to the address it had before its title came still reaches it.
@@ -165,7 +174,51 @@ export function resolveTarget(to, records, selfId, now) {
   if (hits.length > 1) {
     return { error: `"${to}" could be several sessions: ${hits.map(labelOf).join(", ")}. Use the whole address.` };
   }
+  if (selfProfile && wantsAnyOther(want)) {
+    return pickSession(others, selfProfile);
+  }
   return { error: `No running session matches "${to}". Running now: ${named}.` };
+}
+
+// "Some other session", no one named: a word like another, different or other. (Nothing at all is
+// handled by resolveTarget itself.)
+export function wantsAnyOther(to) {
+  const want = String(to ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+  return want === "" || /^(?:an?\s+)?(?:any|another|other|different)(?:\s+(?:one|session|chat))?$/.test(want);
+}
+
+// "A different session", no one named: stay on the caller's own profile, the app it is already in,
+// and never switch accounts unasked. `others` are the live sessions except the caller's. Exactly
+// one on the caller's profile is the answer. Several, or none, is said plainly with who there is,
+// so the caller names one instead of the pick being a guess. Returns { record, why } or { error }.
+export function pickSession(others, selfProfile) {
+  const mine = others.filter((r) => r.profile === selfProfile);
+  if (mine.length === 1) {
+    return { record: mine[0], why: `the only other session on your own ${selfProfile} profile` };
+  }
+  if (mine.length > 1) {
+    return { error: `You have ${mine.length} other sessions on your own ${selfProfile} profile: ${mine.map(labelOf).join(", ")}. Say which one, by its whole address.` };
+  }
+  const away = others.map(labelOf).join(", ");
+  return {
+    error: `No other session is running on your own ${selfProfile} profile.${away ? ` Sessions on other profiles: ${away}. Name one to reach it, which switches accounts, or use open to start another on ${selfProfile}.` : ` Use open to start another on ${selfProfile}.`}`,
+  };
+}
+
+// Which profile `open` uses. A profile the caller named always wins, even when its window is not
+// running yet (it is started). Named nothing, or "another"/"different", it is the caller's own
+// profile, the app the person is already in. With neither, say so rather than guess.
+// Returns { profile, why } or { error }.
+export function chooseProfile(named, callerProfile) {
+  const want = String(named ?? "").trim().toLowerCase();
+  if (want !== "" && !wantsAnyOther(want)) {
+    return { profile: want, why: "named by the caller" };
+  }
+  const own = String(callerProfile ?? "").trim().toLowerCase();
+  if (own !== "") {
+    return { profile: own, why: "this session's own profile, as none other was named" };
+  }
+  return { error: "Couldn't tell which profile this session is on. Name the profile to use." };
 }
 
 // Sorts by time, and two sessions writing in the same millisecond cannot collide.
@@ -277,7 +330,9 @@ export function withLaunchFlags(command, { model, permissionMode } = {}) {
 // `/crosstalk open <profile> [--model m] [--mode p] [message]`, as words. Flags come straight
 // after the profile, as `--model m` or `--model=m`. Returns the parts, or { error }.
 export function parseOpenArgs(words) {
-  const [profile = "", ...rest] = (words ?? []).map(String);
+  const all = (words ?? []).map(String);
+  // `/crosstalk open --model sonnet` names no profile: it opens this session's own.
+  const [profile = "", ...rest] = all[0]?.startsWith("--") ? ["", ...all] : all;
   const parts = { profile: profile.toLowerCase(), model: "", permissionMode: "", message: "" };
   let i = 0;
   while (i < rest.length && rest[i].startsWith("--")) {
@@ -362,6 +417,78 @@ export function chooseOpenIn(fromEnv, saved, termProgram, hasHelper, label = "VS
     return { where: "vscode" };
   }
   return { where: "window", why: inVsCode ? missing : "" };
+}
+
+// Which Claude desktop app window a process is, from its path and command line: "default" for the
+// main window, <name> for the copy claude-app.ps1 starts with --user-data-dir=~\.claude-<name>-app,
+// "" for anything else. The app's helper processes (--type=...) and the claude.exe copies it runs
+// for Code sessions aren't a window. Windows only: the app's paths are matched as installed there.
+export function appWindowOf(path, commandLine) {
+  const exe = String(path ?? "");
+  const line = String(commandLine ?? "");
+  const isApp = /[\\/]WindowsApps[\\/]Claude_[^\\/]+[\\/]app[\\/]claude\.exe$/i.test(exe)
+    || /[\\/]AnthropicClaude[\\/](?:app-[^\\/]+[\\/])?claude\.exe$/i.test(exe);
+  if (!isApp || /\s--type=/.test(line)) {
+    return "";
+  }
+  const dir = /--user-data-dir=(?:"([^"]+)"|(\S+))/i.exec(line);
+  if (!dir) {
+    return "default";
+  }
+  const folder = lastFolder(dir[1] ?? dir[2]);
+  const named = /^\.claude-(.+)-app$/i.exec(folder);
+  return clean(named ? named[1] : folder) || "default";
+}
+
+// The app window this session runs in: the nearest app window among its parent processes, given
+// nearest first as { path, commandLine }. A Terminal-panel tab runs under the window it is a tab
+// of, so a mikey session in a tab of the fuuk window is in the fuuk window. "" when none is.
+export function hostWindow(parents) {
+  for (const p of parents ?? []) {
+    const name = appWindowOf(p?.path, p?.commandLine);
+    if (name) {
+      return name;
+    }
+  }
+  return "";
+}
+
+// The PowerShell parent-process walk that hostWindow reads, one "path<TAB>command line" per line,
+// nearest first. It starts at the shell's own parent, which is this session's claude.exe.
+// No double quotes in it, so it passes through Windows command-line quoting unchanged.
+export const PARENTS_SCRIPT = "$p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID); for ($i = 0; $i -lt 16 -and $p; $i++) { $p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $p.ParentProcessId); if ($p) { [Console]::Out.WriteLine($p.ExecutablePath + [char]9 + ($p.CommandLine -replace '\\s+', ' ')) } }";
+
+export function parseParents(stdout) {
+  return String(stdout ?? "").split(/\r?\n/).filter((l) => l.includes("\t")).map((l) => {
+    const [path, ...rest] = l.split("\t");
+    return { path: path.trim(), commandLine: rest.join("\t").trim() };
+  });
+}
+
+// Words that mean "the same as this session" where open takes a profile: none at all, or one of these.
+export const HERE_WORDS = ["", "here", "same", "this", "self", "me", "mine"];
+// The word that means "the account of the app window I'm looking at".
+export const WINDOW_WORD = "window";
+
+// Which profile `open` starts. A named profile always wins. With none named (or a HERE_WORDS word)
+// it is this session's own profile, so a "different session" stays on the account the person is
+// using. "window" is the account of the app window this session runs in, which differs from this
+// session's own when it runs in a Terminal-panel tab of another account's window; when that window
+// isn't known, it says so instead of guessing. Returns { profile, why, note } or { error }: `why`
+// says how an unnamed profile was picked, `note` names the other account when the two differ.
+export function chooseOpenProfile(given, caller, window) {
+  const word = String(given ?? "").trim().toLowerCase();
+  if (word === WINDOW_WORD) {
+    if (!window) {
+      return { error: "Crosstalk can't tell which Claude app window this session runs in (it may not run in the app). Name a profile instead." };
+    }
+    return { profile: window, why: `the account of the ${window} app window this session runs in`, note: "" };
+  }
+  if (!HERE_WORDS.includes(word)) {
+    return { profile: word, why: "", note: "" };
+  }
+  const note = window && window !== caller ? ` This session runs in a tab of the ${window} app window: open ${window} (or "window") to use that account instead.` : "";
+  return { profile: caller, why: "this session's own profile, as none was named", note };
 }
 
 export const HELPER_ID = "svumo.crosstalk-terminal";

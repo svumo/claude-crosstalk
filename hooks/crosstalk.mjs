@@ -21,6 +21,7 @@ import {
   LINUX_TERMINALS, appDataFolders, appTitle, HOST_SESSION, labelOf, listLine, projectFolderName, transcriptTitle,
   choiceLabel, chosenProfile, COMPACT_INSTRUCTIONS, flagApplies, flagEnds, handoffName, handoffText, isOver, isPaused, LARGE_CONTEXT, LARGE_STOP,
   moveChoices, NOT_NOW, parsePercent, pausedNote, resumePrompt, stopLine, stopPoint, stopReason, summaryOf, USAGE_STOP, usagePhrase, windowKey, windowName, worstWindow,
+  chooseOpenProfile, hostWindow, parseParents, PARENTS_SCRIPT, windowNote,
 } from "./core.mjs";
 import {
   configDirsInShell, homeCandidates, isInstalled, isSafeFolder, isSafeName, isUnreadable, looksLikeProfile,
@@ -84,6 +85,9 @@ let usage = freshUsage();
 function freshUsage() {
   return { window: null, contextPercent: undefined, account: USAGE_STOP, large: { stop: LARGE_STOP, context: LARGE_CONTEXT }, launch: [], here: 0, handled: new Set(), isHeld: false, heldUntil: 0, isStopping: false };
 }
+// The app window this session runs in (core hostWindow), looked up once at start: a promise of
+// the name, or "" when it isn't in one or can't be told.
+let windowLookup = Promise.resolve("");
 
 export function register(on) {
   on("session.start", async ($, e, next) => {
@@ -182,8 +186,9 @@ export function register(on) {
     const now = await $.clock.now();
     const others = (await readSessions($)).filter((r) => r.id !== me.id && isLive(r, now));
     const lines = others.map((r) => `${listLine(r)}${isPaused(r) ? " (paused near its usage limit)" : ""}`);
+    await windowLookup;
     const mine = usagePhrase(me.usage);
-    return { result: `You are ${labelOf(me)}${mine ? `, ${mine}` : ""}.\n${lines.length ? `Also running:\n${lines.join("\n")}` : "No other session is running Crosstalk."}` };
+    return { result: `You are ${labelOf(me)}${windowNote(me)}${mine ? `, ${mine}` : ""}.\n${lines.length ? `Also running:\n${lines.join("\n")}` : "No other session is running Crosstalk."}` };
   });
 
   on("tool.call", { tool: SEND }, async ($, e) => {
@@ -213,7 +218,7 @@ export function register(on) {
     if (!me) {
       return notReady();
     }
-    const opened = await openSession($, String(e.profile ?? "").trim().toLowerCase(), String(e.message ?? ""), { model: e.model, permissionMode: e.permissionMode });
+    const opened = await openSession($, String(e.profile ?? ""), String(e.message ?? ""), { model: e.model, permissionMode: e.permissionMode });
     return opened.error ? failed(opened.error) : { result: opened.text };
   });
 
@@ -259,7 +264,8 @@ export function register(on) {
     const now = await $.clock.now();
     const others = (await readSessions($)).filter((r) => r.id !== me.id && isLive(r, now)).map(labelOf);
     const hint = others.length ? "" : " /crosstalk setup connects your other profiles.";
-    return { text: `You are ${labelOf(me)}${isOff ? " (off)" : ""}. Others running: ${others.join(", ") || "none"}. Wake-ups since you last typed: ${wakes} of ${limit}.${hint}` };
+    await windowLookup;
+    return { text: `You are ${labelOf(me)}${windowNote(me)}${isOff ? " (off)" : ""}. Others running: ${others.join(", ") || "none"}. Wake-ups since you last typed: ${wakes} of ${limit}.${hint}` };
   });
 }
 
@@ -728,12 +734,19 @@ function parsesAsObject(text) {
   }
 }
 
-// Start a session on `profile` in a new terminal, here in this folder, then say so when it is up
-// and hand it `message`. `opts` may set its model and permission mode. Returns { text } at once,
-// or { error }.
-async function openSession($, profile, message, opts = {}) {
+// Start a session on `given` in a new terminal, here in this folder, then say so when it is up
+// and hand it `message`. `given` is a profile, or none / "here" for this session's own, or
+// "window" for the account of the app window it runs in (core chooseOpenProfile). `opts` may set
+// its model and permission mode. Returns { text } at once, or { error }.
+async function openSession($, given, message, opts = {}) {
+  const window = await windowLookup;
+  const picked = chooseOpenProfile(given, me.profile, window);
+  if (picked.error) {
+    return { error: picked.error };
+  }
+  const profile = picked.profile;
   if (!PROFILE_WORD.test(profile)) {
-    return { error: "Usage: /crosstalk open <profile> [--model <model>] [--mode <permission mode>] [first message], such as /crosstalk open zai --mode plan say hello." };
+    return { error: "Usage: /crosstalk open [profile] [--model <model>] [--mode <permission mode>] [first message], such as /crosstalk open zai --mode plan say hello. With no profile it opens this session's own; \"window\" opens the account of the app window it runs in." };
   }
   const setup = await readJson($, `${root}/setup.json`, {});
   const flagged = withLaunchFlags(launchFor(profile, setup), opts);
@@ -755,7 +768,7 @@ async function openSession($, profile, message, opts = {}) {
     if (opened.error) {
       return { error: opened.error };
     }
-    place = "a new tab of the app's Terminal panel";
+    place = window ? `a new tab of the ${window} app window's Terminal panel` : "a new tab of the app's Terminal panel";
     ran = { exitCode: 0 };
   } else if (choice.where === "vscode") {
     place = `a new ${editor.label} terminal`;
@@ -776,7 +789,8 @@ async function openSession($, profile, message, opts = {}) {
   }
   void watchOpened($, profile, since - 2_000, message).catch(() => {});
   const trust = isTrusted ? "" : ` Crosstalk couldn't mark this folder trusted for ${profile}, so it may stop at the folder-trust screen until someone answers it.`;
-  return { text: `Opening ${profile} (${command}) in ${place}${choice.why ? `, as ${choice.why}` : ""}. Crosstalk says here when it is up${message.trim() ? ", then sends it your message" : ""}.${trust}` };
+  const pickedWhy = picked.why ? ` ${profile} is ${picked.why}.${picked.note}` : "";
+  return { text: `Opening ${profile} (${command}) in ${place}${choice.why ? `, as ${choice.why}` : ""}.${pickedWhy} Crosstalk says here when it is up${message.trim() ? ", then sends it your message" : ""}.${trust}` };
 }
 
 // A new tab in the Claude desktop app's Terminal panel, through the app's own tool, so the
@@ -860,6 +874,20 @@ function notReady() {
   return failed("Crosstalk did not start in this session.");
 }
 
+// The Claude desktop app window this session runs in, from its parent processes: "" when it
+// doesn't run in the app, isn't on Windows, or the walk fails. CLAUDE_CROSSTALK_WINDOW sets it.
+async function findWindow($) {
+  const set = await $.env.get("CLAUDE_CROSSTALK_WINDOW");
+  if (set) {
+    return String(set).trim().toLowerCase();
+  }
+  if ((await $.env.get("CLAUDE_CODE_ENTRYPOINT")) !== DESKTOP_ENTRYPOINT || !(await computer($)).isWindows) {
+    return "";
+  }
+  const ran = await $.process.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", PARENTS_SCRIPT], { timeoutMs: 20_000 }).catch(() => null);
+  return ran && ran.exitCode === 0 ? hostWindow(parseParents(ran.stdout)) : "";
+}
+
 async function startUp($) {
   const home = (await $.env.get("CLAUDE_CROSSTALK_HOME")) || (await $.env.get("USERPROFILE")) || (await $.env.get("HOME"));
   const folder = await $.env.get("CLAUDE_CROSSTALK_DIR");
@@ -876,6 +904,14 @@ async function startUp($) {
   const cwd = await $.session.cwd();
   const alias = addressOf(profile, cwd, id);
   me = { id, profile, address: alias, alias, cwd, startedAt: await $.clock.now(), title: "" };
+  // Not awaited: the process walk takes a second or two, and only open and list need it.
+  windowLookup = findWindow($).then(async (name) => {
+    if (name) {
+      me.window = name;
+      await beat($).catch(() => {}); // so other sessions' list shows it now, not at the next beat
+    }
+    return name;
+  }, () => "");
   titling = await titleSources($, profile, config || `${home}/.claude`, id, cwd);
   me.account = titling.account || undefined;
   usage = freshUsage();
@@ -903,20 +939,20 @@ async function startUp($) {
   });
   await $.tool.register({
     name: "open",
-    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in a tab of the Claude desktop app's Terminal panel when this session runs in the app (so the profile's own account runs inside the app), in VS Code or VSCodium when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
+    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Leave `profile` out when the person asks for \"another\" or \"a different\" session without naming an account: it then uses this session's own profile, the account they are working in. Set it only to an account they named, or to \"window\" for the account of the Claude app window this session runs in (list shows it). Opens in a tab of the Claude desktop app's Terminal panel when this session runs in the app (so the profile's own account runs inside the app), in VS Code or VSCodium when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
     inputSchema: {
       type: "object",
       properties: {
-        profile: { type: "string", description: "The profile to start, as /crosstalk names them" },
+        profile: { type: "string", description: "The profile to start, as /crosstalk names them. Leave it out for this session's own profile; \"window\" for the account of the app window this session runs in" },
         message: { type: "string", description: "A first message to send it once it is running" },
         model: { type: "string", description: "Model for the new session, one word such as sonnet, opus or claude-sonnet-5-5" },
         permissionMode: { type: "string", enum: PERMISSION_MODES, description: "Permission mode for the new session" },
       },
-      required: ["profile"],
+      required: [],
     },
     isDeferred: false,
   });
-  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. open <profile> [--model m] [--mode p] [message] starts one; open-in, editor and launch set how (open-in alone shows what it will do); setup connects profiles; add <name> makes one; usage shows or sets where sessions stop near the usage limit; move <profile> hands this session to another account now; off and on pause it." });
+  await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. open [profile|window] [--model m] [--mode p] [message] starts one; open-in, editor and launch set how (open-in alone shows what it will do); setup connects profiles; add <name> makes one; usage shows or sets where sessions stop near the usage limit; move <profile> hands this session to another account now; off and on pause it." });
   $.clock.every(BEAT_MS, () => beat($).catch(() => {}));
   $.clock.every(POLL_MS, () => poll($).catch(() => {}));
   void prune($);

@@ -50,5 +50,32 @@ try { & (Join-Path $root 'claude-app.ps1') -Name 'bad name!' 2>$null } catch { }
 Check 'claude-app.ps1 leaves CLAUDE_CONFIG_DIR alone' ($env:CLAUDE_CONFIG_DIR -eq 'C:\keep-me')
 $env:CLAUDE_CONFIG_DIR = $null
 
+# Which window a script picks: a process told apart as a window, and 'here' versus a named profile.
+. (Join-Path $root 'claude-common.ps1')
+$store = 'C:\Program Files\WindowsApps\Claude_4.1.0.0_x64__abc\app\Claude.exe'
+Check 'the main window is default' ((Get-WindowNameOf $store "`"$store`"") -eq 'default')
+Check 'a claude-app.ps1 window goes by its profile' ((Get-WindowNameOf $store "`"$store`" --user-data-dir=`"C:\Users\me\.claude-Fuuk-app`" `"claude://x`"") -eq 'fuuk')
+Check 'an app helper process is not a window' ($null -eq (Get-WindowNameOf $store "`"$store`" --type=utility"))
+Check 'the Claude Code CLI is not a window' ($null -eq (Get-WindowNameOf 'C:\Users\me\.local\bin\claude.exe' 'claude.exe'))
+$oldWin = $env:CLAUDE_CROSSTALK_WINDOW; $oldCfg = $env:CLAUDE_CONFIG_DIR
+try {
+    $env:CLAUDE_CROSSTALK_WINDOW = 'fuuk'
+    Check 'a named profile wins over here' ((Resolve-WindowName 'Mikey').Name -eq 'mikey' -and -not (Resolve-WindowName 'mikey').Why)
+    Check 'here is the window this session is in' ((Resolve-WindowName 'here').Name -eq 'fuuk')
+    Check 'no name means here' ((Resolve-WindowName '').Name -eq 'fuuk')
+    $env:CLAUDE_CROSSTALK_WINDOW = $null
+    if (-not (Get-HostWindowName)) {
+        # Outside the app (as in CI), here falls back to this session's own profile.
+        $env:CLAUDE_CONFIG_DIR = 'C:\Users\me\.claude-work'
+        Check 'outside the app, here is this profile''s window' ((Resolve-WindowName 'here').Name -eq 'work')
+        $env:CLAUDE_CONFIG_DIR = $null
+        Check 'outside the app with no CLAUDE_CONFIG_DIR, here is the main window' ((Resolve-WindowName 'here').Name -eq 'default')
+        $env:CLAUDE_CONFIG_DIR = 'D:\odd place'
+        Check 'an unknown config folder is not guessed' ($null -eq (Resolve-WindowName 'here'))
+    }
+} finally {
+    $env:CLAUDE_CROSSTALK_WINDOW = $oldWin; $env:CLAUDE_CONFIG_DIR = $oldCfg
+}
+
 if ($failed) { "$failed failed"; exit 1 }
 'All passed'

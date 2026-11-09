@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+**New sessions open where you are**
+- `open` no longer needs a profile. With none, it starts this session's own profile, so "open a different session" stays on the account you're working in. A profile you name still wins.
+- On Windows, Crosstalk finds the desktop-app window a session runs in from its parent processes. A Terminal-panel tab counts as its window's, so a `mikey` session in a tab of the `fuuk` window is "in the fuuk app window". `list` and `/crosstalk` show it, and `/crosstalk open window` (or the `open` tool with `profile: "window"`) starts that window's account. If the window can't be found, Crosstalk says so and doesn't guess. `CLAUDE_CROSSTALK_WINDOW` overrides it.
+- `claude-new-session.ps1 here ...` opens in the window you're in, and `-DryRun` shows which window it would use and why, without opening anything. The `move-chat` skill uses `here` for "use a different session", and asks which account to use when the reason is a usage limit and you didn't name one.
+
 ## 1.7.0
 
 **Usage guard**

@@ -79,7 +79,7 @@ Just ask, in plain words:
 | `/crosstalk setup` | Shows your profiles and what setup would do. Changes nothing |
 | `/crosstalk setup yes` | Does it |
 | `/crosstalk add <name>` | Makes a new profile, ready to log in to |
-| `/crosstalk open <profile> [--model m] [--mode p] [message]` | Starts a session on that profile in a new terminal, in this folder, and sends it your message once it's up. `--model` and `--mode` set its model and permission mode |
+| `/crosstalk open [profile] [--model m] [--mode p] [message]` | Starts a session on that profile in a new terminal, in this folder, and sends it your message once it's up. With no profile, it uses this session's own. `window` uses the account of the desktop-app window this session runs in. `--model` and `--mode` set its model and permission mode |
 | `/crosstalk open-in auto\|app\|vscode\|window` | Where `open` starts it. `auto` is a tab in the Claude desktop app's Terminal panel when you're in the app, an editor tab when you're in VS Code or VSCodium, else a new window. On its own, `/crosstalk open-in` says what `open` will do from this session and why |
 | `/crosstalk editor auto\|code\|codium` | Which editor the tab opens in. `auto` spots VS Code or VSCodium from the terminal this session runs in |
 | `/crosstalk launch <profile> <command>` | The command that starts a profile, such as `claude zai`. Default: `claude-<profile>` |
@@ -95,7 +95,7 @@ Every message that arrives is also shown to you in the transcript, as `Crosstalk
 
 Crosstalk works in the desktop app's Code tab the same way as in a terminal. The app signs in to one account at a time, so there are two ways to add sessions on your other accounts:
 
-- **A tab in the app's Terminal panel (no setup).** From a session in the app, `/crosstalk open mikey` (or "open a session on my mikey account and ask it to review this") starts that profile in a new tab of the app's **Terminal panel**. It runs inside the app on that profile's own login and subscription. Crosstalk uses the app's own Terminal tool, and the app asks you to approve the command. The panel's shell is your PowerShell (or login shell) with your profile loaded, so launch commands such as `claude mikey` work there. `/crosstalk open-in window` goes back to a separate terminal window.
+- **A tab in the app's Terminal panel (no setup).** From a session in the app, `/crosstalk open mikey` (or "open a session on my mikey account and ask it to review this") starts that profile in a new tab of the app's **Terminal panel**. It runs inside the app on that profile's own login and subscription. Crosstalk uses the app's own Terminal tool, and the app asks you to approve the command. The panel's shell is your PowerShell (or login shell) with your profile loaded, so launch commands such as `claude mikey` work there. `/crosstalk open-in window` goes back to a separate terminal window. Ask for "a different session" without naming an account, and it stays on the account you're in. `list` shows which app window each session runs in, and `/crosstalk open window` opens that window's account.
 - **A second app window per account (Windows, one-time setup).** Scripts in [`app-windows/`](app-windows/) run another copy of the app signed in to another account, with its own sidebar and sessions. They can start a session in that window with the folder and prompt filled in, and a `move-chat` skill moves a whole chat across. Run `app-windows\install.ps1` once, then sign in to the new window with the emailed code.
 
 The [desktop app guide](docs/desktop-app.md) covers both: setup, sign-in, limits and troubleshooting.
@@ -332,6 +332,7 @@ Optional environment variables, set before you start a session:
 | `CLAUDE_CROSSTALK_DIR` | The shared folder. Set the same on every profile | `~/.claude-crosstalk` |
 | `CLAUDE_CROSSTALK_WAKE_LIMIT` | Wake-ups in a row before messages wait for you | 25 |
 | `CLAUDE_CROSSTALK_OPEN_IN` | Where `/crosstalk open` starts a session (`auto`, `app`, `vscode`, `window`), over the saved setting | `auto` |
+| `CLAUDE_CROSSTALK_WINDOW` | The desktop-app window this session counts as running in, for `list` and `open window`, over finding it from its parent processes (Windows) | Found |
 | `CLAUDE_CROSSTALK_EDITOR` | Which editor `open` uses for the new terminal tab (`code` or `codium`), over `/crosstalk editor` and spotting it | `auto` |
 | `CLAUDE_CROSSTALK_TERMINAL` | On Linux, the terminal `open` tries first, such as `kitty` or `tmux` | The first one found |
 | `CLAUDE_CROSSTALK_APP_DATA` | The Claude desktop app's data folder, if a desktop-app session's title isn't found where Crosstalk looks | The app copy that started the session, `~/.claude-<profile>-app`, then the standard folders |
