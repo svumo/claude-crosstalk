@@ -56,6 +56,24 @@ export function permissionTarget(body: PermissionRequestBody): string {
   return (body.paths ?? []).join(", ") || body.title;
 }
 
+// A message that is for the person alone, as what to show them; null for one the model reads (a
+// plain message, a task, a reply). A permission request is the person's to answer, so a session
+// shows it and never hands it to its model. Status, event and decision messages have no business
+// in a session's inbox and are shown nowhere.
+export function personOnly(message: unknown): { toast: string; log: string } | null {
+  if (typeof message !== "object" || message === null) {
+    return null;
+  }
+  const m = message as { schema_version?: unknown; kind?: unknown; text?: unknown; body?: { request_id?: unknown } };
+  if (m.schema_version !== 1 || m.kind === "task" || m.kind === "reply" || typeof m.kind !== "string") {
+    return null;
+  }
+  if (m.kind !== "permission_request") {
+    return { toast: "", log: "" };
+  }
+  return { toast: `Copilot is waiting for your answer: /copilot approve ${String(m.body?.request_id ?? "")} or deny`, log: String(m.text ?? "") };
+}
+
 export function permissionText(body: PermissionRequestBody): string {
   const scope = { worktree: "inside its worktree", outside: "OUTSIDE its worktree", none: "" }[body.scope];
   const lines = [

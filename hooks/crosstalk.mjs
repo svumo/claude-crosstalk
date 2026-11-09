@@ -29,6 +29,7 @@ import {
   shortcutBlock, shortcutsIn, tilde, withoutBlock,
 } from "./setup.mjs";
 import { registerCopilot, startCopilot } from "../copilot/mod/register.ts";
+import { personOnly } from "../copilot/protocol/render.ts";
 
 const POLL_MS = 3_000;
 const BEAT_MS = 15_000;
@@ -1195,7 +1196,11 @@ async function startUp($) {
     isDeferred: false,
   });
   await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. <profile> [message] opens a session on that profile where you are; to <who> <message> sends; where shows or sets where open puts it; setup connects profiles; help lists the rest." });
-  await startCopilot($);
+  const configDir = config || `${home}/.claude`;
+  await startCopilot($, {
+    root,
+    who: () => (me ? { id: me.id, address: me.address, profile: me.profile, title: me.title, configDir, transcript: titling?.transcript ?? "" } : null),
+  });
   $.clock.every(BEAT_MS, () => beat($).catch(() => {}));
   $.clock.every(POLL_MS, () => poll($).catch(() => {}));
   void prune($);
@@ -1324,8 +1329,22 @@ async function readSessions($) {
 async function readInbox($) {
   const entries = await $.fs.list(`${root}/inbox/${me.id}`).catch(() => []);
   const batch = [];
+  let hasShown = false;
   for (const name of pendingNames(entries, delivered)) {
     const message = await readJson($, `${root}/inbox/${me.id}/${name}`, null);
+    const forPerson = personOnly(message);
+    if (forPerson) {
+      // A Copilot request is the person's to answer: it is shown, and never handed to the model.
+      if (forPerson.toast) {
+        $.ui.toast(forPerson.toast);
+      }
+      if (forPerson.log) {
+        $.ui.log(forPerson.log);
+      }
+      delivered.add(name);
+      hasShown = true;
+      continue;
+    }
     if (message && typeof message.text === "string") {
       batch.push({ ...message, name });
       continue;
@@ -1335,6 +1354,9 @@ async function readInbox($) {
     if (count >= BAD_TRIES) {
       delivered.add(name);
     }
+  }
+  if (hasShown) {
+    await saveDelivered($);
   }
   return batch;
 }

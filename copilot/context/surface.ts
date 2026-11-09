@@ -3,12 +3,11 @@
 import type { HostContext, Surface } from "./types.ts";
 
 // The variables host detection reads. Only these are ever looked at, and none is passed on.
-export const HOST_VARIABLES = [
-  "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_HOST_SESSION_ID", "TERM_PROGRAM", "WT_SESSION", "TMUX", "SSH_CONNECTION", "SSH_TTY",
-  "VSCODE_GIT_ASKPASS_NODE", "OS", "OSTYPE", "SHELL", "ComSpec", "PSModulePath", "HOME", "USERPROFILE",
-] as const;
+type HostVariable =
+  | "CLAUDE_CODE_ENTRYPOINT" | "CLAUDE_CODE_HOST_SESSION_ID" | "TERM_PROGRAM" | "WT_SESSION" | "TMUX" | "SSH_CONNECTION" | "SSH_TTY"
+  | "VSCODE_GIT_ASKPASS_NODE" | "OS" | "OSTYPE" | "SHELL" | "HOME" | "USERPROFILE";
 
-export type HostVariables = Partial<Record<(typeof HOST_VARIABLES)[number], string | undefined>>;
+export type HostVariables = Partial<Record<HostVariable, string | undefined>>;
 
 const set = (value: string | undefined): boolean => typeof value === "string" && value !== "";
 
