@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Sessions are listed by their real name: a desktop-app session by its title in the app's sidebar, a terminal session by the title Claude Code gave it or the one set with `/rename`. `list`, `/crosstalk`, the "is up" notice and arriving messages show it, as `Claude Fuuk for next task (default/claude-fuuk-next-task-b128f8-730f)`. Each session checks its title on the 15-second heartbeat, so a rename shows up there too.
+- The app title is read from the app's record of the session, in the data folder of the app copy that started it (found from where its Claude Code runs), so a second copy started with `--user-data-dir` works. `~/.claude-<profile>-app` and the standard folders are tried next, and `CLAUDE_CROSSTALK_APP_DATA` names one by hand. A record that names another Claude Code session is ignored, so a terminal that inherited the app's variables doesn't take its title.
+- `send` takes a session's title when only one session has it. Addresses don't change.
+
 ## 1.4.1
 
 - `open` works in VSCodium. Each session spots its editor from the terminal it runs in: VSCodium's terminal gets the new session as a VSCodium tab, through `codium` and a `vscodium://` link, and VS Code's as before. Install the helper in VSCodium with `codium --install-extension <the plugin's folder>/vscode/crosstalk-terminal-0.3.0.vsix`.
