@@ -6,12 +6,9 @@ import {
   chooseOpenIn, editorFor, EDITORS, helperInstall, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
   linuxArgv, linuxCandidates, macArgv, parseOpenArgs, shQuote, userShell, whichArgv,
   appDataFolders, appPanelCommand, appTitle, cleanTitle, labelOf, listLine, projectFolderName, transcriptTitle,
-<<<<<<< HEAD
   chosenProfile, choiceLabel, flagApplies, flagEnds, FLAG_MS, handoffName, isPaused, moveChoices, NOT_NOW, parsePercent, pausedNote,
   resumePrompt, stopPoint, summaryOf, usagePhrase, worstWindow,
-=======
   appWindowOf, chooseOpenProfile, hostWindow, parseParents, windowNote,
->>>>>>> 7ab9ca5 (open picks the caller's own profile when none is named; sessions know the app window they run in)
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -919,7 +916,6 @@ test('a Terminal panel tab keeps its transcript: the app marker is overridden, i
   expect(appPanelCommand('claude-work --model opus', false)).toBe('export CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1; claude-work --model opus')
 })
 
-<<<<<<< HEAD
 // ---- Usage guard ----
 
 test('the fullest window counts, and none off a subscription', async () => {
@@ -1140,7 +1136,8 @@ test('sending to a session paused for usage still delivers, and says it will not
   expect([...w.files.keys()].some((k: string) => k.startsWith(`${BOX}/inbox/p1/`))).toBe(true)
   const listed: any = await $.tool.call({ tool: 'mcp__crosstalk__list' } as never)
   expect(JSON.stringify(listed)).toMatch(/fuuk\/x-p1[^"]*\(paused near its usage limit\)/)
-=======
+})
+
 // Which app window a session runs in, and which profile `open` picks from it.
 const STORE = 'C:\\Program Files\\WindowsApps\\Claude_4.23118.0.0_x64__pzs8sxrjxfjjc\\app\\claude.exe'
 // A mikey session in a Terminal-panel tab of the fuuk window, as the parent walk prints it.
@@ -1220,5 +1217,4 @@ test('outside the app no process walk runs, and "window" says it can\'t tell', a
   expect(await say($, 'open window')).toMatch(/can't tell which Claude app window/)
   expect(await say($, 'open')).toMatch(/Opening work \(claude-work\) in a new terminal window\. work is this session's own profile/)
   expect(calls.some((a) => a[0] === 'powershell.exe')).toBe(false)
->>>>>>> 7ab9ca5 (open picks the caller's own profile when none is named; sessions know the app window they run in)
 })
