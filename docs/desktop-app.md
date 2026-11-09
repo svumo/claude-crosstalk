@@ -19,6 +19,14 @@ Do this whichever option you pick.
 2. Sign in to each profile once from a terminal (`claude-<name>`, or however you start it), so each has its own login.
 3. Restart any session that was already open. Sessions load the plugin only when they start.
 
+## Where `open` goes from the app
+
+On Windows, a session in the app opens other profiles **in their own app window** (option B below), not in a tab. `/crosstalk open fuuk review the diff` starts a Code session in fuuk's window and sends the message. `default` is the main window. If a profile has no window yet, Crosstalk says so; `--in panel` uses a Terminal-panel tab instead (option A). On macOS and Linux the app has one window, so `open` uses a Terminal-panel tab.
+
+## Notifications that open the right window
+
+The app's notifications all belong to one app identity, so on Windows clicking one opens the main window's last session, whichever window raised it. For sessions in an account window, Crosstalk raises its own notification (finished, needs approval, has a question, has a plan). Clicking it opens that window on that session. `/crosstalk setup yes` installs it for this user only, and `app-windows\install.ps1 -Uninstall` removes it. To avoid doubles, set that window's own notification settings to off or badge. The main window keeps the app's own.
+
 ## A. Terminal-panel tab (no extra setup)
 
 In a desktop-app session, say:

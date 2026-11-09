@@ -6,7 +6,7 @@
 # under app-windows\, so every profile finds them in one place that doesn't move when Crosstalk
 # updates. A profile is ~\.claude or ~\.claude-<name> that holds Claude Code's files.
 [CmdletBinding(SupportsShouldProcess)]
-param([string[]]$Shortcuts = @(), [switch]$Uninstall)
+param([string[]]$Shortcuts = @(), [switch]$Uninstall, [switch]$NoLink)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'claude-common.ps1')
 
@@ -31,7 +31,7 @@ if ($PSCmdlet.ShouldProcess($dest, 'Copy the app-windows scripts')) {
     "Scripts: $dest"
 }
 
-if ($PSCmdlet.ShouldProcess($protocol, 'Register the crosstalk-window: link that notifications use')) {
+if (-not $NoLink -and $PSCmdlet.ShouldProcess($protocol, 'Register the crosstalk-window: link that notifications use')) {
     $open = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $dest 'claude-open-link.ps1')`" `"%1`""
     New-Item -Path "$protocol\shell\open\command" -Force | Out-Null
     Set-ItemProperty -Path $protocol -Name '(default)' -Value 'URL:Crosstalk window'

@@ -28,13 +28,13 @@ Set-Content -LiteralPath (Join-Path $home2 '.claude-work\settings.json') -Value 
 $oldHome = $env:USERPROFILE; $oldDir = $env:CLAUDE_CROSSTALK_DIR
 try {
     $env:USERPROFILE = $home2; $env:CLAUDE_CROSSTALK_DIR = $null
-    & (Join-Path $root 'install.ps1') -WhatIf *>&1 | Out-Null
+    & (Join-Path $root 'install.ps1') -NoLink -WhatIf *>&1 | Out-Null
     Check 'install -WhatIf copies nothing' (-not (Test-Path (Join-Path $home2 '.claude-crosstalk\app-windows')))
-    & (Join-Path $root 'install.ps1') | Out-Null
+    & (Join-Path $root 'install.ps1') -NoLink | Out-Null
 } finally {
     $env:USERPROFILE = $oldHome; $env:CLAUDE_CROSSTALK_DIR = $oldDir
 }
-foreach ($s in 'claude-common.ps1', 'claude-app.ps1', 'claude-new-session.ps1', 'claude-press-send.ps1') {
+foreach ($s in 'claude-common.ps1', 'claude-app.ps1', 'claude-new-session.ps1', 'claude-press-send.ps1', 'claude-open-link.ps1', 'claude-toast.ps1') {
     Check "install puts $s in the shared folder" (Test-Path (Join-Path $home2 ".claude-crosstalk\app-windows\$s"))
 }
 Check 'install puts the skill in .claude' (Test-Path (Join-Path $home2 '.claude\skills\move-chat\SKILL.md'))
@@ -76,6 +76,14 @@ try {
 } finally {
     $env:CLAUDE_CROSSTALK_WINDOW = $oldWin; $env:CLAUDE_CONFIG_DIR = $oldCfg
 }
+
+# The notification link takes only a plain window name and an app session id, and the toast the same.
+function Fails([scriptblock]$Run) { try { & $Run 2>&1 | Out-Null; return ($LASTEXITCODE -ne 0) } catch { return $true } }
+foreach ($bad in 'crosstalk-window://open?window=..%5Cx&session=local_1', 'crosstalk-window://open?window=fuuk&session=local_1&q=calc', 'claude://code/new?folder=x', 'calc.exe') {
+    Check "claude-open-link.ps1 refuses $bad" (Fails { & pwsh -NoProfile -File (Join-Path $root 'claude-open-link.ps1') $bad })
+}
+Check 'claude-toast.ps1 refuses a bad window name' (Fails { & pwsh -NoProfile -File (Join-Path $root 'claude-toast.ps1') '..\x' local_1 t b -Force })
+Check 'claude-toast.ps1 refuses a bad session id' (Fails { & pwsh -NoProfile -File (Join-Path $root 'claude-toast.ps1') fuuk 'x; calc' t b -Force })
 
 if ($failed) { "$failed failed"; exit 1 }
 'All passed'
