@@ -16,9 +16,9 @@
 import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
-  chooseOpenIn, findOpened, HELPER_ID, isSafeLaunch, launchFor, OPEN_IN, PERMISSION_MODES, trustProject,
+  appPanelCommand, chooseOpenIn, DESKTOP_ENTRYPOINT, findOpened, HELPER_ID, isSafeLaunch, launchFor, NOT_IN_APP, OPEN_IN, PERMISSION_MODES, trustProject,
   vscodeLink, editorFor, EDITOR_CHOICES, helperInstall, windowArgv, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
-  LINUX_TERMINALS,
+  LINUX_TERMINALS, appDataFolders, appTitle, HOST_SESSION, labelOf, listLine, projectFolderName, transcriptTitle,
 } from "./core.mjs";
 import {
   configDirsInShell, homeCandidates, isInstalled, isSafeFolder, isSafeName, isUnreadable, looksLikeProfile,
@@ -33,6 +33,8 @@ const PRUNE_DAYS = 7;
 const SEND = "mcp__crosstalk__send";
 const LIST = "mcp__crosstalk__list";
 const OPEN = "mcp__crosstalk__open";
+// The desktop app's own tool that types a command into a new tab of its Terminal panel.
+const APP_TERMINAL = "mcp__terminal__run_in_terminal";
 // How long a session being opened has to show up, looked for once a second.
 const OPEN_WAIT_S = 90;
 const PROFILE_WORD = /^[a-z0-9][a-z0-9_-]{0,30}$/;
@@ -40,9 +42,16 @@ const PROFILE_WORD = /^[a-z0-9][a-z0-9_-]{0,30}$/;
 const TRUST_TRIES = 3;
 const TRUST_CHECK_MS = 300;
 const MARKETPLACE = "svumo/claude-crosstalk";
+// Looking for the desktop app's file on this session: how many beats before giving up.
+const APP_FILE_TRIES = 8;
+// A transcript is read whole up to this size, else its last part. Title rows stay near the end.
+const WHOLE_READ = 2 * 1024 * 1024;
+const TAIL_BYTES = 128 * 1024;
+// Once a title is known, a changing transcript is read again at most this often.
+const TRANSCRIPT_EVERY_MS = 60_000;
 
 let limit = 25;
-// { id, profile, address, cwd, startedAt }, set at session.start.
+// { id, profile, address, cwd, startedAt, title }, set at session.start; title is kept current.
 let me = null;
 let root = null;
 let isOff = false;
@@ -54,6 +63,8 @@ let delivered = new Set();
 let tries = new Map();
 // A response's tool calls still waiting for their results.
 let openTools = 0;
+// Where this session's title comes from, found at start and read again on each beat.
+let titling = null;
 
 export function register(on) {
   on("session.start", async ($, e, next) => {
@@ -136,8 +147,8 @@ export function register(on) {
     }
     const now = await $.clock.now();
     const others = (await readSessions($)).filter((r) => r.id !== me.id && isLive(r, now));
-    const lines = others.map((r) => `${r.address} (folder ${r.cwd})`);
-    return { result: `You are ${me.address}.\n${lines.length ? `Also running:\n${lines.join("\n")}` : "No other session is running Crosstalk."}` };
+    const lines = others.map(listLine);
+    return { result: `You are ${labelOf(me)}.\n${lines.length ? `Also running:\n${lines.join("\n")}` : "No other session is running Crosstalk."}` };
   });
 
   on("tool.call", { tool: SEND }, async ($, e) => {
@@ -157,7 +168,7 @@ export function register(on) {
       return failed(found.error);
     }
     await writeMessage($, found.record, text, now);
-    return { result: `Sent to ${found.record.address}. It arrives within a few seconds, or after the step that session is on.` };
+    return { result: `Sent to ${labelOf(found.record)}. It arrives within a few seconds, or after the step that session is on.` };
   });
 
   on("tool.call", { tool: OPEN }, async ($, e) => {
@@ -202,9 +213,9 @@ export function register(on) {
       return { text: await launchCommand($, String(words[1] ?? "").toLowerCase(), words.slice(2).join(" ")) };
     }
     const now = await $.clock.now();
-    const others = (await readSessions($)).filter((r) => r.id !== me.id && isLive(r, now)).map((r) => r.address);
+    const others = (await readSessions($)).filter((r) => r.id !== me.id && isLive(r, now)).map(labelOf);
     const hint = others.length ? "" : " /crosstalk setup connects your other profiles.";
-    return { text: `You are ${me.address}${isOff ? " (off)" : ""}. Others running: ${others.join(", ") || "none"}. Wake-ups since you last typed: ${wakes} of ${limit}.${hint}` };
+    return { text: `You are ${labelOf(me)}${isOff ? " (off)" : ""}. Others running: ${others.join(", ") || "none"}. Wake-ups since you last typed: ${wakes} of ${limit}.${hint}` };
   });
 }
 
@@ -515,7 +526,7 @@ async function addProfile($, name) {
 
 async function writeMessage($, record, text, now) {
   const name = messageFileName(now, Math.random().toString(36).slice(2, 10));
-  await $.fs.write(`${root}/inbox/${record.id}/${name}`, JSON.stringify({ from: me.address, fromId: me.id, to: record.address, sentAt: now, text }));
+  await $.fs.write(`${root}/inbox/${record.id}/${name}`, JSON.stringify({ from: me.address, fromTitle: me.title || undefined, fromId: me.id, to: record.address, sentAt: now, text }));
 }
 
 // The VS Code (or VSCodium) command line. On Windows `code` and `codium` are .cmd files that
@@ -540,18 +551,23 @@ async function resolveOpening($, pc, setup) {
   const termProgram = await $.env.get("TERM_PROGRAM");
   const editor = editorFor(await $.env.get("CLAUDE_CROSSTALK_EDITOR"), setup.editor, await $.env.get("VSCODE_GIT_ASKPASS_NODE"));
   const wanted = String(fromEnv || setup.openIn || "auto").toLowerCase();
-  const checked = wanted !== "window";
+  const inApp = (await $.env.get("CLAUDE_CODE_ENTRYPOINT")) === DESKTOP_ENTRYPOINT;
+  // The editor helper only matters when open may use an editor tab.
+  const checked = wanted === "vscode" || (wanted !== "window" && wanted !== "app" && !inApp);
   const helper = checked ? await hasHelper($, pc, editor) : false;
-  const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper, editor.label);
+  const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper, editor.label, inApp);
   const inEditor = String(termProgram ?? "").toLowerCase() === "vscode";
-  return { fromEnv, editor, helper, checked, choice, inEditor };
+  return { fromEnv, editor, helper, checked, choice, inEditor, inApp };
 }
 
 // One line that says what `open` will do from here, and how to change it.
 function describeOpening(r, pluginRoot) {
+  if (r.choice.where === "app") {
+    return "From this session, open starts a new tab in the Claude desktop app's Terminal panel, as this session runs in the app. The app asks you to approve the command first.";
+  }
   const where = r.choice.where === "vscode" ? `a ${r.editor.label} terminal tab` : "a new terminal window";
   const how = { CLAUDE_CROSSTALK_EDITOR: "set by CLAUDE_CROSSTALK_EDITOR", saved: "set by /crosstalk editor", spotted: r.inEditor ? "spotted from this session's terminal" : "the default, as this session isn't in an editor terminal" }[r.editor.how];
-  const lines = [`From this session, open starts ${where}.`, `Editor: ${r.editor.label} (${how}). Helper: ${!r.checked ? "not checked, as open-in is window" : r.helper ? "installed" : "not found"}.`];
+  const lines = [`From this session, open starts ${where}.`, `Editor: ${r.editor.label} (${how}). Helper: ${!r.checked ? `not checked, as open-in is ${r.choice.why === NOT_IN_APP ? "app" : "window"}` : r.helper ? "installed" : "not found"}.`];
   if (r.choice.why) {
     lines.push(`Why a window: ${r.choice.why}.`);
   }
@@ -569,7 +585,7 @@ async function openInCommand($, value) {
     return `New sessions open in: ${setup.openIn ?? "auto"}${fromEnv ? ` (CLAUDE_CROSSTALK_OPEN_IN=${fromEnv} wins)` : ""}. Choices: ${OPEN_IN.join(", ")}.\n${now}`;
   }
   if (!OPEN_IN.includes(value)) {
-    return `Usage: /crosstalk open-in ${OPEN_IN.join("|")}. auto is an editor tab (VS Code or VSCodium) when this session runs in one, else a new terminal window.`;
+    return `Usage: /crosstalk open-in ${OPEN_IN.join("|")}. auto is a tab in the Claude desktop app's Terminal panel when this session runs in the app, an editor tab (VS Code or VSCodium) when it runs in one, else a new terminal window.`;
   }
   setup.openIn = value;
   await saveSetup($, setup);
@@ -690,7 +706,14 @@ async function openSession($, profile, message, opts = {}) {
   const since = await $.clock.now();
   let ran = null;
   let place = "a new terminal window";
-  if (choice.where === "vscode") {
+  if (choice.where === "app") {
+    const opened = await openInApp($, profile, appPanelCommand(command, pc.isWindows));
+    if (opened.error) {
+      return { error: opened.error };
+    }
+    place = "a new tab of the app's Terminal panel";
+    ran = { exitCode: 0 };
+  } else if (choice.where === "vscode") {
     place = `a new ${editor.label} terminal`;
     ran = await runCode($, pc, editor, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: me.cwd, cmd: command }, editor.scheme)]);
   } else {
@@ -710,6 +733,38 @@ async function openSession($, profile, message, opts = {}) {
   void watchOpened($, profile, since - 2_000, message).catch(() => {});
   const trust = isTrusted ? "" : ` Crosstalk couldn't mark this folder trusted for ${profile}, so it may stop at the folder-trust screen until someone answers it.`;
   return { text: `Opening ${profile} (${command}) in ${place}${choice.why ? `, as ${choice.why}` : ""}. Crosstalk says here when it is up${message.trim() ? ", then sends it your message" : ""}.${trust}` };
+}
+
+// A new tab in the Claude desktop app's Terminal panel, through the app's own tool, so the
+// session runs inside the app on that profile's account. The app shows the person the command to
+// approve. Its shell runs their profile, so `claude mikey`-style functions work there. Returns {}
+// or { error }.
+async function openInApp($, profile, command) {
+  const instead = "/crosstalk open-in window opens a terminal window instead.";
+  let answer;
+  try {
+    answer = await $.tool.call({ tool: APP_TERMINAL, command, cwd: me.cwd, title: `claude ${profile}` });
+  } catch (err) {
+    return { error: `Couldn't reach the app's Terminal panel (${String(err?.message ?? err).slice(0, 200)}). ${instead}` };
+  }
+  if (answer?.deny) {
+    return { error: `The app's Terminal panel didn't run it: ${String(answer.deny).slice(0, 300)}. ${instead}` };
+  }
+  if (answer?.isError) {
+    return { error: `The app's Terminal panel didn't run it: ${resultText(answer).slice(0, 300)}. ${instead}` };
+  }
+  return {};
+}
+
+function resultText(answer) {
+  const result = answer?.text ?? answer?.result;
+  if (typeof result === "string") {
+    return result;
+  }
+  if (Array.isArray(result)) {
+    return result.map((part) => part?.text ?? "").join(" ").trim();
+  }
+  return JSON.stringify(result ?? "");
 }
 
 // A new terminal on macOS (Terminal.app) or Linux (the first terminal found). Returns
@@ -746,7 +801,7 @@ async function watchOpened($, profile, since, message) {
       if (message.trim()) {
         await writeMessage($, found, message.trim(), now);
       }
-      $.ui.log(`Crosstalk: ${found.address} is up${message.trim() ? " and has your message" : ""}.`);
+      $.ui.log(`Crosstalk: ${labelOf(found)} is up${message.trim() ? " and has your message" : ""}.`);
       return;
     }
   }
@@ -775,24 +830,26 @@ async function startUp($) {
   const profile = profileName(given, config, $.plugin.root);
   const id = await $.session.id();
   const cwd = await $.session.cwd();
-  me = { id, profile, address: addressOf(profile, cwd, id), cwd, startedAt: await $.clock.now() };
+  const alias = addressOf(profile, cwd, id);
+  me = { id, profile, address: alias, alias, cwd, startedAt: await $.clock.now(), title: "" };
+  titling = await titleSources($, profile, config || `${home}/.claude`, id, cwd);
   delivered = new Set(await readJson($, `${root}/inbox/${id}/_delivered.json`, []));
   await beat($);
   await $.tool.register({
     name: "send",
-    description: "Send a message to another Claude Code session on this computer, including one on another profile or AI provider. `to` is an address from the crosstalk list tool, or a profile name if that profile has one session running.",
+    description: "Send a message to another Claude Code session on this computer, including one on another profile or AI provider. `to` is an address from the crosstalk list tool, a session's title as list shows it when only one session has it, or a profile name if that profile has one session running.",
     inputSchema: { type: "object", properties: { to: { type: "string", description: "Who it is for" }, text: { type: "string", description: "The message" } }, required: ["to", "text"] },
     isDeferred: false,
   });
   await $.tool.register({
     name: "list",
-    description: "List the other Claude Code sessions on this computer that Crosstalk can reach, on any profile, and this session's own address.",
+    description: "List the other Claude Code sessions on this computer that Crosstalk can reach, on any profile, each by its title (as the desktop app or /rename names it) and address, and this session's own.",
     inputSchema: { type: "object", properties: {} },
     isDeferred: false,
   });
   await $.tool.register({
     name: "open",
-    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in VS Code or VSCodium when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
+    description: "Start a new Claude Code session on a profile (such as zai or work) in a new terminal, in this session's folder, and optionally send it a first message once it is up. Opens in a tab of the Claude desktop app's Terminal panel when this session runs in the app (so the profile's own account runs inside the app), in VS Code or VSCodium when this session runs there, else in a new terminal window. `model` and `permissionMode` set the new session's model and permission mode; left out, it uses the profile's own launch settings. The folder is marked trusted for that profile first, so it starts without the trust screen.",
     inputSchema: {
       type: "object",
       properties: {
@@ -811,9 +868,105 @@ async function startUp($) {
   void prune($);
 }
 
-// Say this session is still running.
+// Say this session is still running, under its title as it is now.
 async function beat($, extra = {}) {
+  if (!extra.endedAt) {
+    me.title = (await currentTitle($).catch(() => "")) || me.title;
+    // The address follows the title, so it reads as the name the person sees.
+    me.address = addressOf(me.profile, me.cwd, me.id, me.title);
+  }
   await $.fs.write(`${root}/sessions/${me.id}.json`, JSON.stringify({ ...me, seenAt: await $.clock.now(), ...extra }));
+}
+
+// Where to read this session's title. A desktop-app session (CLAUDE_CODE_HOST_SESSION_ID) has a
+// file in the app's data folder, which is looked for in each place an app may keep it. Every
+// session has its transcript, under the profile's projects folder.
+async function titleSources($, profile, configDir, id, cwd) {
+  const hostId = String((await $.env.get("CLAUDE_CODE_HOST_SESSION_ID")) ?? "");
+  const folders = HOST_SESSION.test(hostId)
+    ? appDataFolders({
+      override: await $.env.get("CLAUDE_CROSSTALK_APP_DATA"),
+      execPath: await $.env.get("CLAUDE_CODE_EXECPATH"),
+      appData: await $.env.get("APPDATA"),
+      localAppData: await $.env.get("LOCALAPPDATA"),
+      home: (await $.env.get("USERPROFILE")) || (await $.env.get("HOME")),
+      profile,
+    })
+    : [];
+  return {
+    hostId: folders.length ? hostId : "", folders, appFile: null, appTries: 0,
+    account: String((await $.env.get("CLAUDE_CODE_ACCOUNT_UUID")) ?? ""),
+    org: String((await $.env.get("CLAUDE_CODE_ORGANIZATION_UUID")) ?? ""),
+    transcript: `${String(configDir).replace(/\\/g, "/").replace(/\/+$/, "")}/projects/${projectFolderName(cwd)}/${id}.jsonl`,
+    seenMtime: 0, readAt: 0, transcriptTitle: "",
+  };
+}
+
+// The title the person sees now: the desktop app's, else the transcript's. "" for none yet.
+async function currentTitle($) {
+  if (!titling) {
+    return "";
+  }
+  if (titling.hostId && !titling.appFile && titling.appTries < APP_FILE_TRIES) {
+    titling.appTries += 1;
+    titling.appFile = await findAppFile($, titling);
+  }
+  if (titling.appFile) {
+    const text = await readText($, titling.appFile);
+    const title = text === null ? "" : appTitle(text, me.id);
+    if (title) {
+      return title;
+    }
+  }
+  return transcriptTitleNow($);
+}
+
+// <user data>/claude-code-sessions/<account>/<org>/<local_id>.json, in the first folder that has it.
+async function findAppFile($, t) {
+  const name = `${t.hostId}.json`;
+  const isThere = (path) => $.fs.exists(path).catch(() => false);
+  for (const folder of t.folders) {
+    const base = `${folder}/claude-code-sessions`;
+    if (t.account && t.org && (await isThere(`${base}/${t.account}/${t.org}/${name}`))) {
+      return `${base}/${t.account}/${t.org}/${name}`;
+    }
+    for (const account of ((await listFolder($, base)) ?? []).filter((e) => e.kind === "dir")) {
+      for (const org of ((await listFolder($, `${base}/${account.name}`)) ?? []).filter((e) => e.kind === "dir")) {
+        if (await isThere(`${base}/${account.name}/${org.name}/${name}`)) {
+          return `${base}/${account.name}/${org.name}/${name}`;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+// The transcript's title, read again only when the file has changed, and once a title is known
+// at most once a minute.
+async function transcriptTitleNow($) {
+  const t = titling;
+  const stat = await $.fs.stat(t.transcript).catch(() => null);
+  if (!stat || stat.kind !== "file") {
+    return t.transcriptTitle;
+  }
+  const now = await $.clock.now();
+  if (stat.mtimeMs === t.seenMtime || (t.transcriptTitle && now - t.readAt < TRANSCRIPT_EVERY_MS)) {
+    return t.transcriptTitle;
+  }
+  const text = stat.size <= WHOLE_READ ? await readText($, t.transcript) : await readTail($, t.transcript);
+  if (text !== null) {
+    t.seenMtime = stat.mtimeMs;
+    t.readAt = now;
+    t.transcriptTitle = transcriptTitle(text) || t.transcriptTitle;
+  }
+  return t.transcriptTitle;
+}
+
+// The last part of a file too big to read whole, by a host command, as $.fs reads whole files.
+async function readTail($, path) {
+  const script = `const fs=require('fs');const f=fs.openSync(process.argv[1],'r');const n=fs.fstatSync(f).size;const k=Math.min(n,${TAIL_BYTES});const b=Buffer.alloc(k);fs.readSync(f,b,0,k,n-k);process.stdout.write(b.toString('utf8'))`;
+  const ran = await $.process.run(["node", "-e", script, path], { timeoutMs: 10_000 }).catch(() => null);
+  return ran && ran.exitCode === 0 ? ran.stdout : null;
 }
 
 async function readJson($, path, fallback) {

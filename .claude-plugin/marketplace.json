@@ -3,6 +3,7 @@
   "owner": {
     "name": "svumo"
   },
+  "description": "Crosstalk: Claude Code sessions message each other, across profiles, accounts and AI providers on one computer.",
   "plugins": [
     {
       "name": "crosstalk",
