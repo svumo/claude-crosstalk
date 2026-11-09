@@ -1,17 +1,28 @@
 # Changelog
 
-## Unreleased
+## 1.6.0
 
-- Sessions are listed by their real name: a desktop-app session by its title in the app's sidebar, a terminal session by the title Claude Code gave it or the one set with `/rename`. `list`, `/crosstalk`, the "is up" notice and arriving messages show it, as `Claude Fuuk for next task (default/claude-fuuk-for-next-task-730f)`. Each session checks its title on the 15-second heartbeat, so a rename shows up there too.
-- The address is made from the title too, `default/claude-code-mod-fix-3071` rather than `default/scratch-2026-11-09-641b34-3071`, so it matches the name you see. A session with no title yet goes by its folder, and keeps answering to that folder address once titled.
-- The app title is read from the app's record of the session, in the data folder of the app copy that started it (found from where its Claude Code runs), so a second copy started with `--user-data-dir` works. `~/.claude-<profile>-app` and the standard folders are tried next, and `CLAUDE_CROSSTALK_APP_DATA` names one by hand. A record that names another Claude Code session is ignored, so a terminal that inherited the app's variables doesn't take its title.
-- `send` takes a session's title when only one session has it.
+Crosstalk now works properly with the **Claude desktop app**, as well as in terminals and VS Code. The [desktop app guide](docs/desktop-app.md) covers it.
 
-## 1.5.0
+**Sessions on another account, from the app**
+- From a session in the desktop app, `/crosstalk open <profile>` starts that profile in a new tab of the app's **Terminal panel**, so it runs inside the app on that profile's own login and subscription. There's nothing to install: Crosstalk uses the app's own Terminal tool, and the app asks you to approve the command. `auto` picks this whenever the session runs in the app. `/crosstalk open-in app` sets it, and `/crosstalk open-in window` goes back to a separate terminal window.
+- A session opened this way is found even when its shell reports the folder at the app's packaged path (`AppData\Local\Packages\…\LocalCache\Roaming`), so your first message still reaches it.
 
-- From the Claude desktop app, `open` starts the other profile in a new tab of the app's Terminal panel, so a session on another account runs inside the app on its own login. It uses the app's own Terminal tool, so there's nothing to install, and the app asks you to approve the command. `auto` picks it whenever the session runs in the app; `/crosstalk open-in app` sets it, and `window` goes back to a terminal window.
-- A session opened from the app is found even when its shell reports the folder at the app's packaged path (`AppData\Local\Packages\…\LocalCache\Roaming`), so its first message reaches it.
-- `/crosstalk open-in` skips the editor-helper check when open won't use an editor tab.
+**A full app window per account (Windows, optional)**
+- New `app-windows/` folder. Its scripts run a second copy of the desktop app signed in to another account, with its own sidebar, sessions and usage, open a session in that window with the folder and prompt filled in, and press Send for you. A `move-chat` skill hands a whole chat to another account through a handoff file. `app-windows\install.ps1` installs it all and makes Start-menu shortcuts.
+
+**Sessions go by their real name**
+- `list`, `/crosstalk`, the "is up" notice and arriving messages show each session's title with its address: `Review the PR (work/review-the-pr-1a2b)`. In the app, the title is the one in the sidebar. In a terminal, it's the title Claude Code gave the session or the one you set with `/rename`. Titles are checked every 15 seconds, so renames show up.
+- Addresses are made from the title too. A session with no title yet goes by its folder, and keeps answering to that folder address after it's named.
+- `send` accepts a session's title when only one session has it.
+- Titles are found for a second copy of the app as well (`--user-data-dir`, such as `~/.claude-<profile>-app`). If a title isn't found, set `CLAUDE_CROSSTALK_APP_DATA` to that copy's data folder. A record that names another Claude Code session is ignored, so a terminal that inherited the app's variables doesn't take the app's title.
+
+**Smaller**
+- `/crosstalk open-in` skips the editor-helper check when `open` won't use an editor tab.
+
+## 1.5.0 (never released on its own; included in 1.6.0)
+
+- The Terminal-panel `open` above.
 
 ## 1.4.1
 

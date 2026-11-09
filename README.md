@@ -86,11 +86,14 @@ Just ask, in plain words:
 
 Every message that arrives is also shown to you in the transcript, as `Crosstalk ← sender`, so you don't have to ask whether anyone replied.
 
-### Opening a session in the Claude desktop app
+### In the Claude desktop app
 
-The desktop app signs in to one account, and its own sessions always run on that account. From a session in the app, `/crosstalk open mikey` (or "open a session on my mikey account and ask it to review this") starts the other profile in a new tab of the app's **Terminal panel**, so it runs inside the app on that profile's own login and subscription. Nothing else to install: Crosstalk uses the app's own Terminal tool, and the app asks you to approve the command, as it does for any command typed into the panel.
+Crosstalk works in the desktop app's Code tab the same way as in a terminal. The app signs in to one account at a time, so there are two ways to add sessions on your other accounts:
 
-The panel's shell is your PowerShell (or login shell) with your profile loaded, so launch commands such as `claude mikey` work there. Messages go both ways as usual, and the new session shows up in `/crosstalk` once it's up. `/crosstalk open-in window` goes back to a separate terminal window.
+- **A tab in the app's Terminal panel (no setup).** From a session in the app, `/crosstalk open mikey` (or "open a session on my mikey account and ask it to review this") starts that profile in a new tab of the app's **Terminal panel**. It runs inside the app on that profile's own login and subscription. Crosstalk uses the app's own Terminal tool, and the app asks you to approve the command. The panel's shell is your PowerShell (or login shell) with your profile loaded, so launch commands such as `claude mikey` work there. `/crosstalk open-in window` goes back to a separate terminal window.
+- **A second app window per account (Windows, one-time setup).** Scripts in [`app-windows/`](app-windows/) run another copy of the app signed in to another account, with its own sidebar and sessions. They can start a session in that window with the folder and prompt filled in, and a `move-chat` skill moves a whole chat across. Run `app-windows\install.ps1` once, then sign in to the new window with the emailed code.
+
+The [desktop app guide](docs/desktop-app.md) covers both: setup, sign-in, limits and troubleshooting.
 
 ### Session names and addresses
 
@@ -206,7 +209,7 @@ claude
 
 </details>
 
-**A desktop app window per account (Windows).** [`app-windows/`](app-windows/README.md) has scripts that run a second copy of the Claude desktop app for another account, start and send sessions in it from any other session, and a `move-chat` skill that moves a whole chat to another account through a handoff file.
+**In the desktop app**, each account can have its own window: see the [desktop app guide](docs/desktop-app.md).
 
 ## What it works with
 
@@ -302,7 +305,7 @@ Optional environment variables, set before you start a session:
 
 ## Tested on
 
-Windows 11 with Claude Code 2.1.318, using PowerShell 7 and Git Bash. `open` on macOS (Terminal, macOS 26) and Linux (tmux, xterm) is checked for real by the `open check` workflow on GitHub's runners, and Ubuntu under WSL. A full session between two logged-in profiles has only been run on Windows, so reports from macOS and Linux are welcome.
+Windows 11 with Claude Code 2.1.318, using PowerShell 7 and Git Bash. `open` on macOS (Terminal, macOS 26) and Linux (tmux, xterm) is checked for real by the `open check` workflow on GitHub's runners, and Ubuntu under WSL. The Claude desktop app (4.23 on Windows 11, Store install) with the Terminal-panel `open` and a second app window per account. A full session between two logged-in profiles has only been run on Windows, so reports from macOS and Linux are welcome.
 
 ## Accounts and terms
 
