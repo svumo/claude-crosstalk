@@ -27,9 +27,13 @@ export function profileName(override, configDir, pluginRoot) {
   return match ? clean(match[1]) || "default" : "default";
 }
 
-// work/my-project-1a2b: readable, and unique through the end of the session id.
-export function addressOf(profile, cwd, sessionId) {
-  const slug = lastFolder(cwd).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 32) || "session";
+const slugOf = (text) => String(text ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+/, "").slice(0, 32).replace(/-+$/, "");
+
+// work/fix-the-login-page-1a2b: readable, and unique through the end of the session id. Named
+// after the session's title once it has one, so the address matches the name the person sees,
+// and after its folder until then (work/my-project-1a2b). The folder one stays a session's alias.
+export function addressOf(profile, cwd, sessionId, title) {
+  const slug = slugOf(title) || slugOf(lastFolder(cwd)) || "session";
   return `${profile}/${slug}-${String(sessionId).replace(/-/g, "").slice(0, 4)}`;
 }
 
@@ -37,25 +41,129 @@ export function isLive(record, now) {
   return !record.endedAt && now - record.seenAt < LIVE_MS;
 }
 
-// Who `to` means among the live sessions, leaving out the sender: a whole address, the
-// part after the profile, a session id, or a profile with exactly one session running.
-// Returns { record } or { error }, the error naming who there is.
+// Session titles: the name the person sees for a session, which changes as it runs (the desktop
+// app names a session after its first message; /rename renames it). The address follows it (addressOf).
+
+const TITLE_MAX = 120;
+
+// A title as shown: one line, no control characters, not too long. "" for none.
+export function cleanTitle(title) {
+  // eslint-disable-next-line no-control-regex
+  const one = String(title ?? "").replace(/[\u0000-\u001f\u007f]+/g, " ").replace(/\s+/g, " ").trim();
+  return one.length > TITLE_MAX ? `${one.slice(0, TITLE_MAX - 1)}…` : one;
+}
+
+// How a session is named to the person: its title with its address, or the address alone.
+export function labelOf(record) {
+  const title = cleanTitle(record?.title);
+  return title ? `${title} (${record.address})` : String(record?.address ?? "");
+}
+
+// One session in `list`: its title first when it has one, then its address and folder.
+export function listLine(record) {
+  const title = cleanTitle(record?.title);
+  return title ? `${title} (${record.address}, folder ${record.cwd})` : `${record.address} (folder ${record.cwd})`;
+}
+
+// The desktop app keeps one file per session, <user data>/claude-code-sessions/<account>/<org>/
+// <local_id>.json, whose `title` is the one in its sidebar. The file names the Claude Code session
+// it runs (cliSessionId); a file that names another is not this session's, as when a terminal
+// inherits the app's variables. Returns the title, or "".
+export function appTitle(jsonText, sessionId) {
+  let data;
+  try {
+    data = JSON.parse(jsonText);
+  } catch {
+    return "";
+  }
+  if (!data || typeof data !== "object" || typeof data.title !== "string") {
+    return "";
+  }
+  const ids = [data.cliSessionId, data.lastAssistantCliSessionId].filter((v) => typeof v === "string" && v !== "");
+  if (sessionId && ids.length > 0 && !ids.includes(String(sessionId))) {
+    return "";
+  }
+  return cleanTitle(data.title);
+}
+
+// A Claude Code transcript (or its last part) carries title rows: `custom-title` from /rename or
+// the host, which wins, and `ai-title`, the one Claude Code makes. The last of each counts. A
+// first line cut by a tail read just fails to parse. Returns the title, or "".
+export function transcriptTitle(text) {
+  let custom = "";
+  let ai = "";
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.includes("-title\"")) {
+      continue;
+    }
+    try {
+      const row = JSON.parse(line);
+      if (row?.type === "custom-title" && typeof row.customTitle === "string" && cleanTitle(row.customTitle)) {
+        custom = cleanTitle(row.customTitle);
+      } else if (row?.type === "ai-title" && typeof row.aiTitle === "string" && cleanTitle(row.aiTitle)) {
+        ai = cleanTitle(row.aiTitle);
+      }
+    } catch {
+      // a cut or foreign line
+    }
+  }
+  return custom || ai;
+}
+
+// The folder under <config>/projects that holds a session's transcript: the folder's path with
+// every character but a letter or digit made "-".
+export function projectFolderName(cwd) {
+  return String(cwd ?? "").replace(/[^a-zA-Z0-9]/g, "-");
+}
+
+// A desktop-app session id, safe to put in a path.
+export const HOST_SESSION = /^local_[A-Za-z0-9-]{1,80}$/;
+
+// Where a desktop app may keep its data, most likely first. The app that started this session
+// put its Claude Code under its own data folder (<user data>/claude-code/<version>/...), which
+// finds a second copy started with --user-data-dir as well as the Store (MSIX) copy. Then
+// CLAUDE_CROSSTALK_APP_DATA, a second copy's usual folder for this profile, and the standard ones.
+export function appDataFolders({ override, execPath, appData, localAppData, home, profile } = {}) {
+  const tidy = (p) => String(p ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
+  const fromExec = /^(.*)\/claude-code\/[^/]+\/.*$/i.exec(tidy(execPath))?.[1] ?? "";
+  const h = tidy(home);
+  const list = [
+    tidy(override),
+    fromExec,
+    h && profile && profile !== "default" ? `${h}/.claude-${profile}-app` : "",
+    appData ? `${tidy(appData)}/Claude` : "",
+    localAppData ? `${tidy(localAppData)}/Packages/Claude_pzs8sxrjxfjjc/LocalCache/Roaming/Claude` : "",
+    h ? `${h}/Library/Application Support/Claude` : "",
+    h ? `${h}/.config/Claude` : "",
+  ].filter(Boolean);
+  const seen = new Set();
+  return list.filter((p) => !seen.has(p.toLowerCase()) && seen.add(p.toLowerCase()));
+}
+
+const plain = (text) => cleanTitle(text).toLowerCase().replace(/["'“”‘’]/g, "");
+
+// Who `to` means among the live sessions, leaving out the sender: a whole address, the part
+// after the profile, a session id, a profile with exactly one session running, or a session's
+// title (quotes and case aside). Returns { record } or { error }, the error naming who there is.
 export function resolveTarget(to, records, selfId, now) {
   const want = String(to ?? "").trim().toLowerCase();
   const others = records.filter((r) => r.id !== selfId && isLive(r, now));
-  const named = others.map((r) => r.address).join(", ") || "none";
+  const named = others.map(labelOf).join(", ") || "none";
   if (want === "") {
     return { error: `Say who the message is for. Running now: ${named}.` };
   }
-  const exact = others.filter((r) => r.address.toLowerCase() === want || r.id.toLowerCase() === want);
-  const hits = exact.length > 0
-    ? exact
-    : others.filter((r) => r.profile.toLowerCase() === want || r.address.toLowerCase().split("/")[1] === want);
+  // A session's addresses: the one it goes by now, and the folder one it started with (`alias`),
+  // so a message sent to the address it had before its title came still reaches it.
+  const addresses = (r) => [r.address, r.alias].filter((a) => typeof a === "string" && a !== "").map((a) => a.toLowerCase());
+  const exact = others.filter((r) => addresses(r).includes(want) || r.id.toLowerCase() === want);
+  const short = others.filter((r) => r.profile.toLowerCase() === want || addresses(r).some((a) => a.split("/")[1] === want));
+  const titled = others.filter((r) => plain(r.title) !== "" && plain(r.title) === plain(want));
+  const hits = [exact, short, titled].find((h) => h.length > 0) ?? [];
   if (hits.length === 1) {
     return { record: hits[0] };
   }
   if (hits.length > 1) {
-    return { error: `"${to}" could be several sessions: ${hits.map((r) => r.address).join(", ")}. Use the whole address.` };
+    return { error: `"${to}" could be several sessions: ${hits.map(labelOf).join(", ")}. Use the whole address.` };
   }
   return { error: `No running session matches "${to}". Running now: ${named}.` };
 }
@@ -75,8 +183,11 @@ export function pendingNames(entries, delivered) {
 
 // How the model reads a message. It comes from another session, not from the person, and the
 // wording says so: any program on this computer can write to the folder.
+// Who a message is from: the sender's title as it was when sent, with its address.
+const senderOf = (m) => labelOf({ address: m.from, title: m.fromTitle });
+
 export function frameMessages(messages) {
-  const body = messages.map((m) => `From ${m.from}, sent ${new Date(m.sentAt).toISOString()}:\n${m.text}`).join("\n\n");
+  const body = messages.map((m) => `From ${senderOf(m)}, sent ${new Date(m.sentAt).toISOString()}:\n${m.text}`).join("\n\n");
   const one = messages.length === 1;
   return `[Crosstalk] ${one ? "A message" : `${messages.length} messages`} from another Claude Code session on this computer.\n\n`
     + `${body}\n\n`
@@ -99,7 +210,7 @@ export function showMessages(messages, where = "") {
   return messages.map((m) => {
     const text = String(m.text ?? "");
     const time = clockTime(m.sentAt);
-    const head = `Crosstalk ← ${m.from}${time ? ` · ${time}` : ""}`;
+    const head = `Crosstalk ← ${senderOf(m)}${time ? ` · ${time}` : ""}`;
     const body = text.length > SHOW_TEXT
       ? `${text.slice(0, SHOW_TEXT)}… (cut; the whole message is in ${where ? `${where}/` : ""}${m.name ?? "the inbox"})`
       : text;

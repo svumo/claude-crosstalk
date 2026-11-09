@@ -5,6 +5,7 @@ import {
   pendingNames, profileName, resolveTarget, SHOW_TEXT, showMessages, toolResultCount, toolUseCount,
   chooseOpenIn, editorFor, EDITORS, helperInstall, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
   linuxArgv, linuxCandidates, macArgv, parseOpenArgs, shQuote, userShell, whichArgv,
+  appDataFolders, appTitle, cleanTitle, labelOf, listLine, projectFolderName, transcriptTitle,
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -30,6 +31,24 @@ test('a name set by hand wins, and an unset config folder falls back', async () 
 
 test('an address is readable and carries the session', async () => {
   expect(addressOf('work', 'C:\\code\\My Web_App', 'ab12-cd34')).toBe('work/my-web-app-ab12')
+})
+
+test('an address goes by the session title once it has one, else its folder', async () => {
+  expect(addressOf('default', 'C:\\scratch\\scratch-2026-11-09-641b34', '3071f301', 'Claude code mod fix')).toBe('default/claude-code-mod-fix-3071')
+  expect(addressOf('work', 'C:\\code\\proj', 'ab12', '  ')).toBe('work/proj-ab12')
+  expect(addressOf('work', 'C:\\code\\proj', 'ab12', '✨ !!')).toBe('work/proj-ab12')
+  // cut at 32 characters, with no dash left hanging at the cut
+  expect(addressOf('work', 'x', 'ab12', 'Build listing ingest + value model for the shop')).toBe('work/build-listing-ingest-value-model-ab12')
+  expect(addressOf('work', 'x', 'ab12', 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa b')).toBe('work/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-ab12')
+})
+
+test('a session is still reached at the folder address it had before its title came', async () => {
+  const titled = { ...rec('p1', 'personal', 'personal/fix-the-login-b-2'), alias: 'personal/b-2' }
+  const all = [rec('me', 'work', 'work/a-1'), titled]
+  expect(resolveTarget('personal/fix-the-login-b-2', all, 'me', NOW).record?.id).toBe('p1')
+  expect(resolveTarget('personal/b-2', all, 'me', NOW).record?.id).toBe('p1')
+  expect(resolveTarget('b-2', all, 'me', NOW).record?.id).toBe('p1')
+  expect(resolveTarget('fix-the-login-b-2', all, 'me', NOW).record?.id).toBe('p1')
 })
 
 test('a session stops being live when it ends or goes quiet', async () => {
@@ -113,6 +132,13 @@ function fakeDisk(on: any, env: Record<string, string> = { USERPROFILE: 'C:\\hom
     const names = [...new Set(rests.map((r) => r.split('/')[0]))]
     return { value: names.map((name) => ({ name, kind: rests.includes(name) ? 'file' : 'dir', size: 1, mtimeMs: 1, isLink: false })) }
   })
+  on('fs.exists', (_: any, e: any) => ({ value: files.has(slash(e.path)) }))
+  // A file's time is its length here, so a file that grows has changed.
+  on('fs.stat', (_: any, e: any) => {
+    if (!files.has(slash(e.path))) throw new Error('ENOENT')
+    const size = files.get(slash(e.path)).length
+    return { value: { kind: 'file', size, mtimeMs: size, isLink: false } }
+  })
   on('process.run', (_: any, e: any) => ({ value: run(e, files) }))
   on('session.start', (_: any, e: any) => ({ cwd: e.cwd }))
   on('ui.toast', () => ({ value: undefined }))
@@ -120,7 +146,10 @@ function fakeDisk(on: any, env: Record<string, string> = { USERPROFILE: 'C:\\hom
   on('ui.log', (_: any, e: any) => { files.logs.push(e.text); return { value: undefined } })
   on('clock.now', () => ({ value: NOW }))
   // Polling runs when a test says so; everything else never ticks.
-  on('clock.every', (_: any, e: any) => new Promise<any>((resolve) => { if (e.ms === 3000) (files as any).tick = () => resolve({ value: undefined }) }))
+  on('clock.every', (_: any, e: any) => new Promise<any>((resolve) => {
+    if (e.ms === 3000) (files as any).tick = () => resolve({ value: undefined })
+    if (e.ms === 15000) (files as any).beat = () => resolve({ value: undefined })
+  }))
   return files
 }
 
@@ -747,4 +776,134 @@ test('on Linux open uses the terminal it finds, and says so when there is none',
   expect(calls.at(-1)).toEqual(linuxArgv('konsole', 'C:\\code\\proj', 'claude-mikey', '/bin/zsh'))
   installed = ''
   expect(await say($, 'open mikey')).toMatch(/Couldn't find a terminal to open/)
+})
+
+// Session titles: the name the person sees in the desktop app, or from /rename.
+
+test('a title is one tidy line, and a session is named by it with its address', async () => {
+  expect(cleanTitle('  Claude Fuuk\nfor   next task\u0007 ')).toBe('Claude Fuuk for next task')
+  expect(cleanTitle(undefined)).toBe('')
+  expect(cleanTitle('x'.repeat(300)).length).toBe(120)
+  expect(labelOf({ address: 'default/a-1', title: 'Fix the login' })).toBe('Fix the login (default/a-1)')
+  expect(labelOf({ address: 'default/a-1', title: '  ' })).toBe('default/a-1')
+  expect(listLine({ address: 'default/a-1', title: 'Fix the login', cwd: 'C:\\code' })).toBe('Fix the login (default/a-1, folder C:\\code)')
+  expect(listLine({ address: 'default/a-1', cwd: 'C:\\code' })).toBe('default/a-1 (folder C:\\code)')
+})
+
+test('the desktop app title is read from its session file, only for this session', async () => {
+  const file = (o: object) => JSON.stringify({ sessionId: 'local_1', cliSessionId: 'cli-1', title: 'Claude Fuuk for next task', titleSource: 'auto', ...o })
+  expect(appTitle(file({}), 'cli-1')).toBe('Claude Fuuk for next task')
+  expect(appTitle(file({ cliSessionId: 'cli-2', lastAssistantCliSessionId: 'cli-1' }), 'cli-1')).toBe('Claude Fuuk for next task')
+  expect(appTitle(file({}), 'someone-else')).toBe('') // a terminal that inherited the app's variables
+  expect(appTitle(file({ title: 42 }), 'cli-1')).toBe('')
+  expect(appTitle('{not json', 'cli-1')).toBe('')
+})
+
+test('a transcript title: /rename wins over the made one, the last of each counts, a cut line is skipped', async () => {
+  const row = (o: object) => JSON.stringify(o)
+  const ai = (t: string) => row({ type: 'ai-title', aiTitle: t, sessionId: 's' })
+  const custom = (t: string) => row({ type: 'custom-title', customTitle: t, sessionId: 's' })
+  expect(transcriptTitle([ai('First go'), row({ type: 'user', message: 'x' }), ai('Better name')].join('\n'))).toBe('Better name')
+  expect(transcriptTitle([custom('Mine'), ai('Made one')].join('\n'))).toBe('Mine')
+  expect(transcriptTitle(['tle","aiTitle":"cut off"}', ai('Whole')].join('\n'))).toBe('Whole')
+  expect(transcriptTitle('')).toBe('')
+})
+
+test('a transcript is found under the folder the CLI names after the working folder', async () => {
+  expect(projectFolderName('C:\\Users\\me\\Documents\\github\\claude-crosstalk\\.claude\\worktrees\\zen-1')).toBe('C--Users-me-Documents-github-claude-crosstalk--claude-worktrees-zen-1')
+  expect(projectFolderName('/home/me/my app')).toBe('-home-me-my-app')
+})
+
+test('the app data folder: the one its Claude Code runs from, a second copy for this profile, then the usual ones', async () => {
+  const msix = 'C:\\Users\\me\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude'
+  const found = appDataFolders({
+    execPath: `${msix}\\claude-code\\2.1.317\\a33aa\\claude.exe`,
+    appData: 'C:\\Users\\me\\AppData\\Roaming', localAppData: 'C:\\Users\\me\\AppData\\Local', home: 'C:\\Users\\me', profile: 'fuuk',
+  })
+  expect(found.slice(0, 3)).toEqual([msix.replace(/\\/g, '/'), 'C:/Users/me/.claude-fuuk-app', 'C:/Users/me/AppData/Roaming/Claude'])
+  expect(found.filter((f) => f.toLowerCase() === msix.replace(/\\/g, '/').toLowerCase()).length).toBe(1) // once, though listed twice
+  const second = appDataFolders({ execPath: 'C:\\Users\\me\\.claude-fuuk-app\\claude-code\\2.1.317\\x\\claude.exe', home: 'C:\\Users\\me', profile: 'fuuk' })
+  expect(second[0]).toBe('C:/Users/me/.claude-fuuk-app')
+  expect(appDataFolders({ override: 'D:\\apps\\claude\\', home: '/home/me', profile: 'default' })).toEqual(['D:/apps/claude', '/home/me/Library/Application Support/Claude', '/home/me/.config/Claude'])
+})
+
+test('a message can go to a session by its title, when only one has it', async () => {
+  const t = (id: string, address: string, title: string) => ({ ...rec(id, address.split('/')[0], address), title })
+  const all = [rec('me', 'work', 'work/a-1'), t('f1', 'fuuk/x-1', 'Claude Fuuk for next task'), t('d1', 'default/y-2', 'Same name'), t('d2', 'default/z-3', 'Same name')]
+  expect(resolveTarget('claude fuuk for next task', all, 'me', NOW).record?.id).toBe('f1')
+  expect(resolveTarget('"Claude Fuuk for next task"', all, 'me', NOW).record?.id).toBe('f1')
+  expect(resolveTarget('Same name', all, 'me', NOW).error).toMatch(/could be several sessions: Same name \(default\/y-2\), Same name \(default\/z-3\)/)
+  expect(resolveTarget('nobody', all, 'me', NOW).error).toMatch(/Running now: Claude Fuuk for next task \(fuuk\/x-1\)/)
+  expect(resolveTarget('fuuk', all, 'me', NOW).record?.id).toBe('f1') // a profile still works
+})
+
+const APP = 'C:/home/.claude-work-app'
+const APP_ENV = {
+  USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work',
+  CLAUDE_CODE_HOST_SESSION_ID: 'local_abc-1', CLAUDE_CODE_EXECPATH: 'C:\\home\\.claude-work-app\\claude-code\\2.1.0\\abc\\claude.exe',
+  CLAUDE_CODE_ACCOUNT_UUID: 'acct', CLAUDE_CODE_ORGANIZATION_UUID: 'org',
+}
+const appFile = (title: string, cli = 'self-1') => JSON.stringify({ sessionId: 'local_abc-1', cliSessionId: cli, title })
+const TRANSCRIPT = 'C:/home/.claude-work/projects/C--code-proj/self-1.jsonl'
+
+test('a desktop-app session goes by its app title, read from its own app copy, and follows a rename', async ($, on) => {
+  const files = fakeDisk(on, APP_ENV)
+  files.set(`${APP}/claude-code-sessions/acct/org/local_abc-1.json`, appFile('New session'))
+  await $.session.start(START)
+  const mine = () => JSON.parse(files.get(`${BOX}/sessions/self-1.json`)!)
+  expect(mine().title).toBe('New session')
+  // the address follows the title, and the folder one is kept as its alias
+  expect(mine().address).toBe('work/new-session-self')
+  expect(mine().alias).toBe('work/proj-self')
+
+  files.set(`${APP}/claude-code-sessions/acct/org/local_abc-1.json`, appFile('Claude Fuuk for next task'))
+  files.beat()
+  await settle()
+  expect(mine().title).toBe('Claude Fuuk for next task')
+  expect(mine().address).toBe('work/claude-fuuk-for-next-task-self')
+
+  files.set(`${BOX}/sessions/other.json`, JSON.stringify({ id: 'other', profile: 'personal', address: 'personal/x-oth', cwd: 'C:/y', seenAt: NOW, title: 'Tidy the docs' }))
+  const listed: any = await $.tool.call({ tool: 'mcp__crosstalk__list' } as never)
+  expect(JSON.stringify(listed)).toMatch(/You are Claude Fuuk for next task \(work\/claude-fuuk-for-next-task-self\)/)
+  expect(JSON.stringify(listed)).toMatch(/Tidy the docs \(personal\/x-oth, folder C:\/y\)/)
+
+  const sent: any = await $.tool.call({ tool: 'mcp__crosstalk__send', to: 'tidy the docs', text: 'hi' } as never)
+  expect(JSON.stringify(sent)).toMatch(/Sent to Tidy the docs \(personal\/x-oth\)/)
+  const written = [...files.keys()].find((k) => k.startsWith(`${BOX}/inbox/other/`))!
+  expect(JSON.parse(files.get(written)!)).toMatchObject({ from: 'work/claude-fuuk-for-next-task-self', fromTitle: 'Claude Fuuk for next task' })
+})
+
+test('without the account variables the app file is looked for in each account folder', async ($, on) => {
+  const { CLAUDE_CODE_ACCOUNT_UUID: _a, CLAUDE_CODE_ORGANIZATION_UUID: _o, ...env } = APP_ENV
+  const files = fakeDisk(on, env)
+  files.set(`${APP}/claude-code-sessions/other-acct/other-org/local_zzz-9.json`, appFile('Not mine'))
+  files.set(`${APP}/claude-code-sessions/acct2/org2/local_abc-1.json`, appFile('Found it'))
+  await $.session.start(START)
+  expect(JSON.parse(files.get(`${BOX}/sessions/self-1.json`)!).title).toBe('Found it')
+})
+
+test('a terminal session goes by its transcript title, and so does one whose app variables are not its own', async ($, on) => {
+  const files = fakeDisk(on, APP_ENV)
+  files.set(`${APP}/claude-code-sessions/acct/org/local_abc-1.json`, appFile('The parent session', 'parent-cli'))
+  files.set(TRANSCRIPT, `${JSON.stringify({ type: 'ai-title', aiTitle: 'Review the PR' })}\n`)
+  await $.session.start(START)
+  expect(JSON.parse(files.get(`${BOX}/sessions/self-1.json`)!).title).toBe('Review the PR')
+})
+
+test('a session with no title yet goes by its address, and is named when one comes', async ($, on) => {
+  const files = fakeDisk(on)
+  await $.session.start(START)
+  expect(JSON.parse(files.get(`${BOX}/sessions/self-1.json`)!).title).toBe('')
+  const said: any = await $.command.run({ command: 'crosstalk', args: '' } as never)
+  expect(JSON.stringify(said)).toMatch(/You are work\/proj-self\./)
+  files.set(TRANSCRIPT, `${JSON.stringify({ type: 'custom-title', customTitle: 'Renamed by hand' })}\n`)
+  files.beat()
+  await settle()
+  expect(JSON.parse(files.get(`${BOX}/sessions/self-1.json`)!).title).toBe('Renamed by hand')
+})
+
+test('a message from a titled session shows the title with the address', async () => {
+  const m = { from: 'fuuk/x-1', fromTitle: 'Claude Fuuk for next task', sentAt: NOW, text: 'done', name: 'a.json' }
+  expect(frameMessages([m])).toMatch(/From Claude Fuuk for next task \(fuuk\/x-1\), sent/)
+  expect(showMessages([m])).toMatch(/^Crosstalk ← Claude Fuuk for next task \(fuuk\/x-1\) · /)
 })

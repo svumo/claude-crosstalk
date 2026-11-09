@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Sessions are listed by their real name: a desktop-app session by its title in the app's sidebar, a terminal session by the title Claude Code gave it or the one set with `/rename`. `list`, `/crosstalk`, the "is up" notice and arriving messages show it, as `Claude Fuuk for next task (default/claude-fuuk-for-next-task-730f)`. Each session checks its title on the 15-second heartbeat, so a rename shows up there too.
+- The address is made from the title too, `default/claude-code-mod-fix-3071` rather than `default/scratch-2026-11-09-641b34-3071`, so it matches the name you see. A session with no title yet goes by its folder, and keeps answering to that folder address once titled.
+- The app title is read from the app's record of the session, in the data folder of the app copy that started it (found from where its Claude Code runs), so a second copy started with `--user-data-dir` works. `~/.claude-<profile>-app` and the standard folders are tried next, and `CLAUDE_CROSSTALK_APP_DATA` names one by hand. A record that names another Claude Code session is ignored, so a terminal that inherited the app's variables doesn't take its title.
+- `send` takes a session's title when only one session has it.
+
 ## 1.5.0
 
 - From the Claude desktop app, `open` starts the other profile in a new tab of the app's Terminal panel, so a session on another account runs inside the app on its own login. It uses the app's own Terminal tool, so there's nothing to install, and the app asks you to approve the command. `auto` picks it whenever the session runs in the app; `/crosstalk open-in app` sets it, and `window` goes back to a terminal window.

@@ -73,7 +73,7 @@ Just ask, in plain words:
 
 | Command | What it does |
 |---|---|
-| `/crosstalk` | Shows this session's address and who it can reach |
+| `/crosstalk` | Shows this session's name and address, and who it can reach |
 | `/crosstalk off` | Pauses it: messages wait |
 | `/crosstalk on` | Turns it back on |
 | `/crosstalk setup` | Shows your profiles and what setup would do. Changes nothing |
@@ -91,6 +91,21 @@ Every message that arrives is also shown to you in the transcript, as `Crosstalk
 The desktop app signs in to one account, and its own sessions always run on that account. From a session in the app, `/crosstalk open mikey` (or "open a session on my mikey account and ask it to review this") starts the other profile in a new tab of the app's **Terminal panel**, so it runs inside the app on that profile's own login and subscription. Nothing else to install: Crosstalk uses the app's own Terminal tool, and the app asks you to approve the command, as it does for any command typed into the panel.
 
 The panel's shell is your PowerShell (or login shell) with your profile loaded, so launch commands such as `claude mikey` work there. Messages go both ways as usual, and the new session shows up in `/crosstalk` once it's up. `/crosstalk open-in window` goes back to a separate terminal window.
+
+### Session names and addresses
+
+Each session is listed by the name you see for it, with its address:
+
+```
+You are Crosstalk: name sessions by their app title (default/crosstalk-name-sessions-by-their-0850).
+Also running:
+Claude Fuuk for next task (default/claude-fuuk-for-next-task-730f, folder C:\code\cc-consent-forms)
+Review the PR (work/review-the-pr-1a2b, folder C:\code\my-app)
+```
+
+**The name** is the session's title. A session in the Claude desktop app goes by its title in the app's sidebar. Crosstalk reads it from the app's own record of the session, in the data folder of the app copy that started it, so a second copy of the app (started with `--user-data-dir`, say for another account) works too. A session in a terminal goes by the title Claude Code gave it, or the one you set with `/rename`. Titles change as a session runs (the app names a session after its first message), so each session checks its own about every 15 seconds. A session with no title yet is listed by its address alone. Messages show the sender's name too: `Crosstalk ← Claude Fuuk for next task (default/claude-fuuk-for-next-task-730f)`.
+
+**The address** is made from the title, `profile/title-xxxx`, such as `work/review-the-pr-1a2b`, so it reads as the name you see. Until a session has a title it goes by its folder, `work/my-app-1a2b`, and it keeps answering to that folder address after its title comes, so a message sent to it still arrives. To send a message, use the address, the profile name alone when that profile has one session running, or the session's title when only one session has it ("send Claude Fuuk for next task a message").
 
 ### Opening a session in VS Code or VSCodium
 
@@ -136,8 +151,6 @@ By default the new session opens as a tab to the right of your terminal tabs at 
 | `crosstalkTerminal.focus` | `true`: jump to the new tab. `false`: stay where you are | `true` |
 
 After installing or updating the helper, reload the editor window (**Developer: Reload Window**) so the new version loads. Restarting only the extension host doesn't load it.
-
-**Addresses** look like `profile/folder-xxxx`, such as `work/my-app-1a2b`. The profile name alone works when that profile has one session running.
 
 Crosstalk carries the messages; it doesn't plan the work. Whichever session you ask does the orchestrating, so you can make any session the lead.
 
@@ -257,7 +270,8 @@ Each session records that it's running and checks its own inbox. When a message 
 | A session isn't listed | Restart it, as sessions only load the plugin when they start. `/crosstalk setup` shows if it's installed on that profile. |
 | Install says "Host key verification failed" on Windows | The profile's folder path may be too long. In testing, installs failed from 140 characters, so use a shorter folder. |
 | A profile isn't in `/crosstalk setup` | Add it with `/crosstalk setup add <folder>`. |
-| "could be several sessions" | That profile has more than one session running, so use the whole address. |
+| "could be several sessions" | That profile, or that title, has more than one session running, so use the whole address. |
+| A session shows its address, not its name | It has no title yet: the app and Claude Code name a session after its first message, and Crosstalk picks the name up within about 15 seconds. For a desktop-app session that never gets one, set `CLAUDE_CROSSTALK_APP_DATA` to that app copy's data folder. Sessions on an older Crosstalk show their address alone. |
 | Two profiles show the same name | Change one with `/crosstalk setup name`. |
 | A message didn't wake a session | Run `/crosstalk` there. It may be off, or at its wake-up limit, which clears when you type. |
 | A provider can't send messages | Its model may not support tool calls. |
@@ -280,6 +294,7 @@ Optional environment variables, set before you start a session:
 | `CLAUDE_CROSSTALK_OPEN_IN` | Where `/crosstalk open` starts a session (`auto`, `app`, `vscode`, `window`), over the saved setting | `auto` |
 | `CLAUDE_CROSSTALK_EDITOR` | Which editor `open` uses for the new terminal tab (`code` or `codium`), over `/crosstalk editor` and spotting it | `auto` |
 | `CLAUDE_CROSSTALK_TERMINAL` | On Linux, the terminal `open` tries first, such as `kitty` or `tmux` | The first one found |
+| `CLAUDE_CROSSTALK_APP_DATA` | The Claude desktop app's data folder, if a desktop-app session's title isn't found where Crosstalk looks | The app copy that started the session, `~/.claude-<profile>-app`, then the standard folders |
 
 `/crosstalk open-in`, `/crosstalk editor` and `/crosstalk launch` save their settings in `setup.json` in the shared folder, so every profile uses them.
 
