@@ -28,6 +28,7 @@ import {
   manualInstall, mergeBlock, norm, parseWords, planSetup, previewText, providerHost, sameFolder, savedName,
   shortcutBlock, shortcutsIn, tilde, withoutBlock,
 } from "./setup.mjs";
+import { registerCopilot, startCopilot } from "../copilot/mod/register.ts";
 
 const POLL_MS = 3_000;
 const BEAT_MS = 15_000;
@@ -97,6 +98,8 @@ let openFolder = null;
 const NOTIFY_GAP_MS = 5_000;
 
 export function register(on) {
+  registerCopilot(on);
+
   on("session.start", async ($, e, next) => {
     const result = await next(e);
     try {
@@ -1192,6 +1195,7 @@ async function startUp($) {
     isDeferred: false,
   });
   await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. <profile> [message] opens a session on that profile where you are; to <who> <message> sends; where shows or sets where open puts it; setup connects profiles; help lists the rest." });
+  await startCopilot($);
   $.clock.every(BEAT_MS, () => beat($).catch(() => {}));
   $.clock.every(POLL_MS, () => poll($).catch(() => {}));
   void prune($);
