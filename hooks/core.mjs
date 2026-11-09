@@ -330,20 +330,27 @@ export function withLaunchFlags(command, { model, permissionMode } = {}) {
 // `/crosstalk open <profile> [--model m] [--mode p] [message]`, as words. Flags come straight
 // after the profile, as `--model m` or `--model=m`. Returns the parts, or { error }.
 export function parseOpenArgs(words) {
-  const all = (words ?? []).map(String);
+  let all = (words ?? []).map(String);
+  // "claude fuuk" is the fuuk profile, as people say it.
+  if (all[0]?.toLowerCase() === "claude" && all[1] && !all[1].startsWith("--")) {
+    all = [`claude-${all[1]}`, ...all.slice(2)];
+  }
   // `/crosstalk open --model sonnet` names no profile: it opens this session's own.
   const [profile = "", ...rest] = all[0]?.startsWith("--") ? ["", ...all] : all;
-  const parts = { profile: profile.toLowerCase(), model: "", permissionMode: "", message: "" };
+  const parts = { profile: profile.toLowerCase(), model: "", permissionMode: "", openIn: "", message: "" };
   let i = 0;
   while (i < rest.length && rest[i].startsWith("--")) {
     const [flag, joined] = rest[i].split(/=(.*)/s);
     const value = joined ?? rest[i + 1];
-    const key = { "--model": "model", "--mode": "permissionMode", "--permission-mode": "permissionMode" }[flag.toLowerCase()];
+    const key = { "--model": "model", "--mode": "permissionMode", "--permission-mode": "permissionMode", "--in": "openIn" }[flag.toLowerCase()];
     if (!key) {
-      return { error: `Unknown option ${flag}. open takes --model <model> and --mode <permission mode>.` };
+      return { error: `Unknown option ${flag}. open takes --model <model>, --mode <permission mode> and --in <${OPEN_IN.join("|")}>.` };
     }
     if (value === undefined || value === "") {
-      return { error: `${flag} needs a value, such as ${key === "model" ? "--model sonnet" : "--mode plan"}.` };
+      return { error: `${flag} needs a value, such as ${key === "model" ? "--model sonnet" : key === "openIn" ? "--in window" : "--mode plan"}.` };
+    }
+    if (key === "openIn" && !OPEN_IN.includes(value.toLowerCase())) {
+      return { error: `--in takes ${OPEN_IN.join(", ")}, not ${value}.` };
     }
     parts[key] = value;
     i += joined === undefined ? 2 : 1;
@@ -390,7 +397,9 @@ export function appPanelCommand(command, isWindows) {
     : `export CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1; ${command}`;
 }
 
-export const OPEN_IN = ["auto", "app", "vscode", "window"];
+// app: where the session runs in the Claude desktop app (a window of the profile's own on Windows,
+// else a Terminal-panel tab); panel: always the Terminal panel; editor is another word for vscode.
+export const OPEN_IN = ["auto", "app", "panel", "vscode", "editor", "window"];
 
 // The Claude desktop app sets this on the Claude Code sessions it runs.
 export const DESKTOP_ENTRYPOINT = "claude-desktop";
@@ -401,11 +410,15 @@ export const NOT_IN_APP = "this session isn't running in the Claude desktop app"
 // in a VS Code-family terminal (VS Code or VSCodium) and the helper is installed there, else a
 // terminal window. `label` names the editor in the reason.
 export function chooseOpenIn(fromEnv, saved, termProgram, hasHelper, label = "VS Code", inApp = false) {
-  const wanted = [fromEnv, saved].map((v) => String(v ?? "").trim().toLowerCase()).find((v) => OPEN_IN.includes(v)) ?? "auto";
+  const asked = [fromEnv, saved].map((v) => String(v ?? "").trim().toLowerCase()).find((v) => OPEN_IN.includes(v)) ?? "auto";
+  const wanted = asked === "editor" ? "vscode" : asked;
   const inVsCode = String(termProgram ?? "").toLowerCase() === "vscode";
   const missing = `the Crosstalk terminal helper isn't installed in ${label}`;
   if (wanted === "window") {
     return { where: "window" };
+  }
+  if (wanted === "panel") {
+    return inApp ? { where: "panel" } : { where: "window", why: NOT_IN_APP };
   }
   if (wanted === "app" || (wanted === "auto" && inApp)) {
     return inApp ? { where: "app" } : { where: "window", why: NOT_IN_APP };
@@ -465,6 +478,31 @@ export function parseParents(stdout) {
   });
 }
 
+// A profile as people say it: "fuuk", "claude-fuuk", "claude fuuk", "the fuuk app", "my fuuk account".
+// Filler words go; what is left is the name. "claude" alone is the default profile.
+export function profileWord(text) {
+  const words = String(text ?? "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const kept = words.filter((w) => !["the", "my", "a", "an", "app", "window", "account", "profile", "claude", "desktop", "code"].includes(w));
+  if (kept.length === 0) {
+    return words.includes("claude") ? "default" : "";
+  }
+  const name = kept.join("-");
+  return name === "main" ? "default" : name.replace(/^claude-/, "");
+}
+
+// The link a notification carries so a click opens the window the session runs in, on that session:
+// crosstalk-window://open?window=<profile>&session=<local id>. Only a plain profile name and an
+// app session id are taken, the same shapes the app's own links accept.
+export const TOAST_SCHEME = "crosstalk-window";
+export function toastLink(window, hostId) {
+  return `${TOAST_SCHEME}://open?window=${encodeURIComponent(window)}&session=${encodeURIComponent(hostId)}`;
+}
+
+export function parseToastLink(url) {
+  const m = /^crosstalk-window:\/\/open\?window=([A-Za-z0-9][A-Za-z0-9_-]{0,30})&session=(local_[A-Za-z0-9-]{1,64})\/?$/.exec(String(url ?? "").trim());
+  return m ? { window: m[1].toLowerCase(), session: m[2] } : null;
+}
+
 // Words that mean "the same as this session" where open takes a profile: none at all, or one of these.
 export const HERE_WORDS = ["", "here", "same", "this", "self", "me", "mine"];
 // The word that means "the account of the app window I'm looking at".
@@ -485,7 +523,7 @@ export function chooseOpenProfile(given, caller, window) {
     return { profile: window, why: `the account of the ${window} app window this session runs in`, note: "" };
   }
   if (!HERE_WORDS.includes(word)) {
-    return { profile: word, why: "", note: "" };
+    return { profile: profileWord(word), why: "", note: "" };
   }
   const note = window && window !== caller ? ` This session runs in a tab of the ${window} app window: open ${window} (or "window") to use that account instead.` : "";
   return { profile: caller, why: "this session's own profile, as none was named", note };

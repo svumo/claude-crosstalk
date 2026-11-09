@@ -6,12 +6,21 @@
 # under app-windows\, so every profile finds them in one place that doesn't move when Crosstalk
 # updates. A profile is ~\.claude or ~\.claude-<name> that holds Claude Code's files.
 [CmdletBinding(SupportsShouldProcess)]
-param([string[]]$Shortcuts = @())
+param([string[]]$Shortcuts = @(), [switch]$Uninstall)
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'claude-common.ps1')
 
 $dest = Join-Path (Get-CrosstalkDir) 'app-windows'
-$scripts = 'claude-common.ps1', 'claude-app.ps1', 'claude-new-session.ps1', 'claude-press-send.ps1'
+$scripts = 'claude-common.ps1', 'claude-app.ps1', 'claude-new-session.ps1', 'claude-press-send.ps1', 'claude-open-link.ps1', 'claude-toast.ps1'
+
+# Notifications that open the right window: the crosstalk-window: link, and a name per window.
+$protocol = 'HKCU:\Software\Classes\crosstalk-window'
+if ($Uninstall) {
+    foreach ($k in $protocol, 'HKCU:\Software\Classes\AppUserModelId\Crosstalk.Claude.*') {
+        if (Test-Path $k) { if ($PSCmdlet.ShouldProcess($k, 'Remove')) { Remove-Item -Path $k -Recurse -Force; "Removed $k" } }
+    }
+    return
+}
 
 if ($PSCmdlet.ShouldProcess($dest, 'Copy the app-windows scripts')) {
     New-Item -ItemType Directory -Force $dest | Out-Null
@@ -20,6 +29,15 @@ if ($PSCmdlet.ShouldProcess($dest, 'Copy the app-windows scripts')) {
         Unblock-File -LiteralPath (Join-Path $dest $s)
     }
     "Scripts: $dest"
+}
+
+if ($PSCmdlet.ShouldProcess($protocol, 'Register the crosstalk-window: link that notifications use')) {
+    $open = "powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$(Join-Path $dest 'claude-open-link.ps1')`" `"%1`""
+    New-Item -Path "$protocol\shell\open\command" -Force | Out-Null
+    Set-ItemProperty -Path $protocol -Name '(default)' -Value 'URL:Crosstalk window'
+    New-ItemProperty -Path $protocol -Name 'URL Protocol' -Value '' -Force | Out-Null
+    Set-ItemProperty -Path "$protocol\shell\open\command" -Name '(default)' -Value $open
+    "Link: crosstalk-window: (this user only)"
 }
 
 # The same rule as Crosstalk's setup (hooks/setup.mjs): .claude or .claude-<name>, not Crosstalk's

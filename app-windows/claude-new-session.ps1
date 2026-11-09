@@ -13,6 +13,8 @@ param(
     [Parameter(Mandatory)][Alias('Profile')][string]$Name,
     [Parameter(Mandatory)][string]$Folder,
     [string]$Prompt,
+    # A UTF-8 file holding the prompt, for text that is awkward to pass on a command line
+    [string]$PromptFile,
     [switch]$Send,
     [switch]$DryRun
 )
@@ -28,6 +30,8 @@ if (-not $picked) {
 }
 $Name = $picked.Name
 if ($picked.Why) { "Using the $Name window: $($picked.Why)." }
+
+if ($PromptFile) { $Prompt = (Get-Content -LiteralPath $PromptFile -Raw -Encoding UTF8).Trim() }
 
 if ($Prompt -match '^/([\w:.-]+)\s*(.*)$') {
     $Prompt = if ($Matches[2]) { "Use the $($Matches[1]) skill: $($Matches[2])" } else { "Use the $($Matches[1]) skill." }

@@ -8,7 +8,7 @@ import {
   appDataFolders, appPanelCommand, appTitle, cleanTitle, labelOf, listLine, projectFolderName, transcriptTitle,
   chosenProfile, choiceLabel, flagApplies, flagEnds, FLAG_MS, handoffName, isPaused, moveChoices, NOT_NOW, parsePercent, pausedNote,
   resumePrompt, stopPoint, summaryOf, usagePhrase, worstWindow,
-  appWindowOf, chooseOpenProfile, hostWindow, parseParents, windowNote,
+  appWindowOf, chooseOpenProfile, hostWindow, parseParents, windowNote, parseToastLink, profileWord, toastLink,
 } from '../hooks/core.mjs'
 import {
   configDirsInShell, hasLauncher, homeCandidates, isSafeFolder, isSafeName, looksLikeProfile, mergeBlock, nameTaken,
@@ -472,13 +472,13 @@ test('a permission mode is matched whatever its case', async () => {
 })
 
 test('/crosstalk open reads --model and --mode after the profile, and the rest is the message', async () => {
-  expect(parseOpenArgs(['Mikey', '--model', 'sonnet', '--mode=plan', 'say', 'hi'])).toEqual({ profile: 'mikey', model: 'sonnet', permissionMode: 'plan', message: 'say hi' })
-  expect(parseOpenArgs(['zai', '--permission-mode', 'auto'])).toEqual({ profile: 'zai', model: '', permissionMode: 'auto', message: '' })
-  expect(parseOpenArgs(['zai', 'use', '--model', 'x'])).toEqual({ profile: 'zai', model: '', permissionMode: '', message: 'use --model x' })
+  expect(parseOpenArgs(['Mikey', '--model', 'sonnet', '--mode=plan', 'say', 'hi'])).toEqual({ profile: 'mikey', model: 'sonnet', permissionMode: 'plan', openIn: '', message: 'say hi' })
+  expect(parseOpenArgs(['zai', '--permission-mode', 'auto'])).toEqual({ profile: 'zai', model: '', permissionMode: 'auto', openIn: '', message: '' })
+  expect(parseOpenArgs(['zai', 'use', '--model', 'x'])).toEqual({ profile: 'zai', model: '', permissionMode: '', openIn: '', message: 'use --model x' })
   expect(parseOpenArgs(['zai', '--fast']).error).toMatch(/Unknown option --fast/)
   expect(parseOpenArgs(['zai', '--model']).error).toMatch(/needs a value/)
   expect(parseOpenArgs(['zai', '--mode=']).error).toMatch(/needs a value/)
-  expect(parseOpenArgs([])).toEqual({ profile: '', model: '', permissionMode: '', message: '' })
+  expect(parseOpenArgs([])).toEqual({ profile: '', model: '', permissionMode: '', openIn: '', message: '' })
 })
 
 test('on macOS a Terminal window opens in the folder, however the folder is named', async () => {
@@ -656,6 +656,7 @@ test('from the desktop app, open types the launch command into a new Terminal pa
   on('clock.sleep', () => ({ value: undefined }))
   files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey' } }))
   await $.session.start(START)
+  await say($, 'open-in panel')
   const status = await say($, 'open-in')
   expect(status).toMatch(/new tab in the Claude desktop app's Terminal panel/)
   const ok: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'mikey', model: 'sonnet' } as never)
@@ -1180,7 +1181,7 @@ test('open with no profile stays on this session\'s own, a named one wins, and "
   expect(chooseOpenProfile('Default', 'mikey', 'fuuk')).toEqual({ profile: 'default', why: '', note: '' })
   expect(chooseOpenProfile('window', 'mikey', 'fuuk').profile).toBe('fuuk')
   expect(chooseOpenProfile('window', 'mikey', '').error).toMatch(/can't tell which Claude app window/)
-  expect(parseOpenArgs(['--model', 'sonnet', 'hi'])).toEqual({ profile: '', model: 'sonnet', permissionMode: '', message: 'hi' })
+  expect(parseOpenArgs(['--model', 'sonnet', 'hi'])).toEqual({ profile: '', model: 'sonnet', permissionMode: '', openIn: '', message: 'hi' })
 })
 
 test('from a tab of another account\'s window, open picks this session\'s profile unless one is named', async ($, on) => {
@@ -1194,6 +1195,7 @@ test('from a tab of another account\'s window, open picks this session\'s profil
   on('clock.sleep', () => ({ value: undefined }))
   files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey', fuuk: 'claude fuuk' } }))
   await $.session.start(START)
+  await say($, 'open-in panel')
   const listed: any = await $.tool.call({ tool: 'mcp__crosstalk__list' } as never)
   expect(JSON.stringify(listed)).toMatch(/You are mikey\/proj-self, in the fuuk app window\./)
   expect(walks).toHaveLength(1)
@@ -1217,4 +1219,105 @@ test('outside the app no process walk runs, and "window" says it can\'t tell', a
   expect(await say($, 'open window')).toMatch(/can't tell which Claude app window/)
   expect(await say($, 'open')).toMatch(/Opening work \(claude-work\) in a new terminal window\. work is this session's own profile/)
   expect(calls.some((a) => a[0] === 'powershell.exe')).toBe(false)
+})
+
+// ---- Open where you are, shorter commands, notifications that open their own window ----
+
+test('a profile is told as people say it, and a notification link only takes plain names', async () => {
+  expect(['fuuk', 'claude-fuuk', 'claude fuuk', 'the fuuk app', 'my Work account', 'claude', 'main'].map(profileWord))
+    .toEqual(['fuuk', 'fuuk', 'fuuk', 'fuuk', 'work', 'default', 'default'])
+  const link = toastLink('fuuk', 'local_ab-12')
+  expect(parseToastLink(link)).toEqual({ window: 'fuuk', session: 'local_ab-12' })
+  expect(parseToastLink('crosstalk-window://open?window=../x&session=local_1')).toBe(null)
+  expect(parseToastLink('crosstalk-window://open?window=fuuk&session=local_1&q=calc')).toBe(null)
+  expect(parseToastLink('claude://code/new?folder=x')).toBe(null)
+  expect(parseOpenArgs(['claude', 'fuuk', '--in', 'window', 'hi'])).toMatchObject({ profile: 'claude-fuuk', openIn: 'window', message: 'hi' })
+  expect(parseOpenArgs(['fuuk', '--in', 'nowhere']).error).toMatch(/--in takes/)
+  expect(chooseOpenIn('panel', undefined, '', false, 'VS Code', true)).toEqual({ where: 'panel' })
+  expect(chooseOpenIn('editor', undefined, 'vscode', true)).toEqual({ where: 'vscode' })
+})
+
+// A mikey session in the app, with fuuk's app window on disk and the plugin's scripts in place.
+function inAppWindows(on: any, extraEnv: Record<string, string> = {}, regFails = false) {
+  const calls: any[] = []
+  const typed: any[] = []
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-mikey', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', ...extraEnv }, (e: any) => {
+    calls.push(e.argv)
+    if (e.argv[0] === 'powershell.exe' && e.argv.includes('-Command')) return { ...RAN_OK, stdout: IN_FUUK }
+    if (e.argv[0] === 'reg' && regFails) return { ...RAN_OK, exitCode: 1 }
+    return RAN_OK
+  })
+  on('tool.call', { tool: 'mcp__terminal__run_in_terminal' }, (_: any, e: any) => { typed.push(e); return { result: [{ type: 'text', text: 'Started' }] } })
+  on('clock.sleep', () => ({ value: undefined }))
+  files.set('C:/home/.claude-fuuk-app/Preferences', '{}')
+  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey', fuuk: 'claude fuuk' } }))
+  return { calls, typed, files }
+}
+
+test('from the app on Windows, open starts the session in the named profile\'s own app window', async ($, on) => {
+  const { calls, typed, files } = inAppWindows(on)
+  await $.session.start(START)
+  const opened: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'claude fuuk', message: 'review the diff' } as never)
+  expect(JSON.stringify(opened)).toMatch(/Opened fuuk in fuuk's Claude app window\. Its first message was sent/)
+  const run = calls.find((a) => a.includes('-File') && /claude-new-session\.ps1$/.test(a[a.indexOf('-File') + 1]))!
+  expect(run.slice(run.indexOf('-File') + 2, run.indexOf('-File') + 4)).toEqual(['fuuk', 'C:\\code\\proj'])
+  expect(run).toContain('-Send')
+  const promptFile = run[run.indexOf('-PromptFile') + 1]
+  expect(files.get(slash(promptFile))).toMatch(/^\[Crosstalk\] .*opened this session\. It says:\n\nreview the diff$/)
+  expect(typed).toHaveLength(0) // not the Terminal panel
+  expect(calls.some((a) => a[0] === 'wt')).toBe(false) // not a window of the terminal
+  // The main window needs no folder of its own; with no message nothing is sent.
+  const main: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'default' } as never)
+  expect(JSON.stringify(main)).toMatch(/Opened default in the main Claude app window\..*nothing was sent/)
+  expect(calls.filter((a) => a.includes('-Send'))).toHaveLength(1)
+})
+
+test('a profile with no app window yet is said, not guessed at, and --in panel still works', async ($, on) => {
+  const { typed } = inAppWindows(on)
+  await $.session.start(START)
+  const missing = await say($, 'open zai hello')
+  expect(missing).toMatch(/zai has no Claude app window on this computer yet.*--in panel/)
+  expect(await say($, 'open zai --in panel hello')).toMatch(/Opening zai \(claude-zai\) in a new tab of the .*Terminal panel/)
+  expect(typed).toHaveLength(1)
+})
+
+test('a profile\'s name works as a command, and to sends without the model', async ($, on) => {
+  const { calls, files } = inAppWindows(on)
+  await $.session.start(START)
+  files.set(`${BOX}/sessions/other.json`, JSON.stringify({ id: 'other', profile: 'fuuk', address: 'fuuk/x-oth', cwd: 'y', seenAt: NOW }))
+  expect(await say($, 'fuuk look at the build')).toMatch(/Opened fuuk in fuuk's Claude app window/)
+  expect(calls.some((a) => a.includes('-PromptFile'))).toBe(true)
+  expect(await say($, 'to fuuk check the build')).toMatch(/^Sent to fuuk\/x-oth/)
+  expect([...files.keys()].some((k: string) => k.startsWith(`${BOX}/inbox/other/`))).toBe(true)
+  expect(await say($, 'to')).toMatch(/^Usage: \/crosstalk to/)
+  expect(await say($, 'help')).toMatch(/\/crosstalk where/)
+  expect(await say($, '')).toMatch(/\/crosstalk <profile> \[message\]/)
+})
+
+test('a session in an account window raises a notification that opens that window, once the link is registered', async ($, on) => {
+  const { calls } = inAppWindows(on, { CLAUDE_CODE_HOST_SESSION_ID: 'local_abc-123' })
+  on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: 'done' }))
+  await $.session.start(START)
+  await settle()
+  await $.turn.start({ turnId: 't1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'done' } as never)
+  await settle()
+  const toast = calls.find((a) => a.includes('-File') && /claude-toast\.ps1$/.test(a[a.indexOf('-File') + 1]))!
+  expect(toast.slice(toast.indexOf('-File') + 2, toast.indexOf('-File') + 4)).toEqual(['fuuk', 'local_abc-123'])
+  expect(toast.at(-1)).toBe('fuuk: finished')
+  expect(calls.some((a) => a[0] === 'reg' && /crosstalk-window/.test(a[2]))).toBe(true)
+})
+
+test('no notification without the registered link, outside an account window, or for the main window', async ($, on) => {
+  // The link isn't registered: reg query fails.
+  const first = inAppWindows(on, { CLAUDE_CODE_HOST_SESSION_ID: 'local_abc-123' }, true)
+  on('turn.start', (_: any, e: any) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: 'done' }))
+  await $.session.start(START)
+  await settle()
+  await $.turn.start({ turnId: 't1' } as never)
+  await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'done' } as never)
+  await settle()
+  expect(first.calls.some((a) => a.some((x: string) => /claude-toast\.ps1$/.test(x)))).toBe(false)
 })
