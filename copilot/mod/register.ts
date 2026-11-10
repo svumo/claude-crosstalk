@@ -143,7 +143,8 @@ export function registerCopilot(on: On): void {
       const label = ringLabel(quota, (isLive(shown) && shown?.model) || configModel);
       if (e.surface !== "terminal" && ui.Svg) {
         const ring = ringSvg(percent, label, animate);
-        mine.push(ui.Svg({ key: "usage-copilot", source: ring.source, alt: ring.alt, width: ring.width, height: ring.height }));
+        // A picture of fixed size: flexShrink 0 so a full row can't squeeze it to a smudge.
+        mine.push(Box({ key: "usage-copilot", flexShrink: 0, children: [ui.Svg({ source: ring.source, alt: ring.alt, width: ring.width, height: ring.height })] }));
       } else {
         const line = ringLine(percent, label);
         mine.push(Text({ color: PALETTE.muted, children: [Text({ color: line.color, children: line.bar }), ` ${line.text}`] }));
