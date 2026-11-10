@@ -12,6 +12,7 @@
 - `/copilot setup` installs the official Copilot SDK (pinned, install scripts off) into Crosstalk's own folder, and tasks then run on it: it checks every tool call before it runs. Without it, tasks run on Copilot CLI over ACP. `"account"` in the settings pins the GitHub login Copilot must be signed in as.
 - Needs Node.js 22.18 or newer and Copilot signed in by you (`copilot login`). Crosstalk handles no tokens. See [docs/copilot.md](docs/copilot.md).
 - Messages have a version 1 format that today's sessions still read as before.
+- **Fix:** when Crosstalk reloaded mid-turn (an update installed into a running session), a message the session had already had could reach the model again. The session went live before it read which messages it had had; it now reads that first.
 
 ## 1.8.2
 

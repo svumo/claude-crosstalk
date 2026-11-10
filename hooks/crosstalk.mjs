@@ -1146,6 +1146,10 @@ async function startUp($) {
   const id = await $.session.id();
   const cwd = await $.session.cwd();
   const alias = addressOf(profile, cwd, id);
+  // Read what this session has had before `me` is set: once it is, the inbox can be read (a tool
+  // result mid-turn, a turn's end), and a reload starts `delivered` empty, so every old message
+  // would go to the model again.
+  delivered = new Set(await readJson($, `${root}/inbox/${id}/_delivered.json`, []));
   me = { id, profile, address: alias, alias, cwd, startedAt: await $.clock.now(), title: "" };
   // Not awaited: the process walk takes a second or two, and only open and list need it.
   windowLookup = findWindow($).then(async (name) => {
@@ -1166,7 +1170,6 @@ async function startUp($) {
     usage.isHeld = usage.heldUntil > (await $.clock.now());
   }
   await loadGuard($);
-  delivered = new Set(await readJson($, `${root}/inbox/${id}/_delivered.json`, []));
   await beat($);
   await $.tool.register({
     name: "send",
