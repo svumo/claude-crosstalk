@@ -8,6 +8,7 @@
 // person, grey once a turn has ended and it waits for a follow-up.
 
 import type { TaskStateFile } from "../protocol/layout.ts";
+import { resetLabel } from "../protocol/quota.ts";
 import type { Quota } from "../protocol/quota.ts";
 import { FINAL_STATES } from "../protocol/schema.ts";
 
@@ -39,6 +40,12 @@ export const isLive = (state: TaskStateFile | null): boolean => state !== null &
 
 // The share the ring shows: the month's premium credits used. An unlimited plan shows none.
 export const ringPercent = (quota: Quota): number => (quota.unlimited ? 0 : quota.percentUsed);
+
+// The words beside the ring: `gh · reset 1 Dec`, or `gh` when GitHub gives no reset day.
+export function ringLabel(quota: Quota): string {
+  const reset = resetLabel(quota.resetDate);
+  return reset ? `gh · reset ${reset}` : "gh";
+}
 
 // When GitHub's meter can't be read, a word where the ring would be.
 export const UNAVAILABLE: Piece = { text: "copilot meter unavailable", color: PALETTE.muted };
@@ -75,8 +82,6 @@ const FILL_MS = 900;
 const TEXT_SIZE = 12.5;
 const FONT = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, sans-serif";
 export const RING_COLOR = PALETTE.accent;
-// The `claude` label before skins' rings, in Claude's own coral (build choice).
-export const CLAUDE_LABEL = "#d97757";
 // The key on the Copilot row when it is drawn on its own (no skins band beneath this hook).
 export const COPILOT_ROW_KEY = "crosstalk-copilot";
 const SETTLED = ".fill{animation:none!important}";

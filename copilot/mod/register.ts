@@ -20,7 +20,7 @@ import { captureContext } from "./capture.ts";
 import type { Who } from "./capture.ts";
 import { isPerson } from "./engine.ts";
 import type { Engine, On, Origin } from "./engine.ts";
-import { blockBars, CLAUDE_LABEL, COPILOT_ROW_KEY, intoBand, isLive, PALETTE, pickShown, ringLine, ringPercent, ringSvg, taskPieces, UNAVAILABLE } from "./meter.ts";
+import { blockBars, COPILOT_ROW_KEY, intoBand, isLive, PALETTE, pickShown, ringLabel, ringLine, ringPercent, ringSvg, taskPieces, UNAVAILABLE } from "./meter.ts";
 import type { Piece } from "./meter.ts";
 
 // What Crosstalk hands over at session start: its shared folder, and this session as it is now.
@@ -123,11 +123,14 @@ export function registerCopilot(on: On): void {
       // Fills in when it first draws and when the number moves, like skins' rings; settled between.
       const animate = now - ringChangedAt < RING_FILL_MS;
       // The terminal draws Svg as nothing, so it gets skins' text meter there.
+      // Short, to save room on the row: `11% gh · reset 1 Dec` (build choice: gh, as the meter is
+      // GitHub's), the day GitHub's monthly allowance starts again.
+      const label = ringLabel(quota);
       if (e.surface !== "terminal" && ui.Svg) {
-        const ring = ringSvg(percent, "copilot", animate);
+        const ring = ringSvg(percent, label, animate);
         mine.push(ui.Svg({ key: "usage-copilot", source: ring.source, alt: ring.alt, width: ring.width, height: ring.height }));
       } else {
-        const line = ringLine(percent, "copilot");
+        const line = ringLine(percent, label);
         mine.push(Text({ color: PALETTE.muted, children: [Text({ color: line.color, children: line.bar }), ` ${line.text}`] }));
       }
     } else if (quotaFailed) {
@@ -136,11 +139,10 @@ export function registerCopilot(on: On): void {
     if (shown) {
       mine.push(pieces(taskPieces(shown, tickedAt, e.props?.bodyColumns ?? 80)));
     }
-    // Among skins' context / 5h / 7d rings when its band is drawn; else a row of its own.
-    // A `claude` label leads skins' rings, so the two accounts' meters read apart. In the
+    // Among skins' context / 5h / 7d rings when its band is drawn; else a row of its own. In the
     // terminal skins' bars are redrawn in the same blocks as Copilot's.
     const base = e.surface === "terminal" ? blockBars(theirs) : theirs;
-    const joined = intoBand(base, mine,[Text({ color: CLAUDE_LABEL, bold: true, children: "claude" })]);
+    const joined = intoBand(base, mine);
     if (joined.joined) {
       return joined.node;
     }

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { blockBars, intoBand, pickShown, ringLine, ringPercent, ringSvg, shortId, taskPieces } from '../copilot/mod/meter.ts'
+import { blockBars, intoBand, pickShown, ringLabel, ringLine, ringPercent, ringSvg, shortId, taskPieces } from '../copilot/mod/meter.ts'
 import type { TaskStateFile } from '../copilot/protocol/layout.ts'
 import { credits, movedLine, parseQuota, quotaLine, resetLabel } from '../copilot/protocol/quota.ts'
 import { replyText } from '../copilot/protocol/render.ts'
@@ -56,6 +56,10 @@ test('the copilot ring is skins\' ring in purple: fills in when it changes, sett
   expect(ringSvg(97, 'copilot', false).source).toMatch(/stroke="#ff5555" stroke-width="3" stroke-linecap/)
   expect(ringLine(11, 'copilot')).toEqual({ bar: '█░░░░░░░', text: '11% copilot', color: '#bd93f9' })
   expect(ringLine(50, 'copilot').bar).toBe('████░░░░')
+  // Short words, to save room on the row, with the day the allowance starts again.
+  expect(ringLabel(QUOTA)).toBe('gh · reset 1 Dec')
+  expect(ringLabel({ ...QUOTA, resetDate: '' })).toBe('gh')
+  expect(ringSvg(11, ringLabel(QUOTA), false).source).toMatch(/> gh · reset 1 Dec</)
   // Skins' terminal bars are redrawn in the same blocks; other text is left alone.
   const skins = { type: 'Text', props: { color: 'grey' }, children: [{ type: 'Text', props: { color: 'blue' }, children: ['▰▰▰▱▱▱▱▱'] }, ' 39% 7d'] }
   const redrawn: any = blockBars(skins)

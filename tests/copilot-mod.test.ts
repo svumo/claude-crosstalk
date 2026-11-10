@@ -241,14 +241,14 @@ const mountBand = ($: any, surface: string) => $.ui.mount({
   props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 140, scroll: { offset: 0, bodyRows: 6 }, view: {} },
 } as never)
 
-test('the copilot ring joins the skins meters, with claude leading them', async ($, on) => {
+test('the copilot ring joins the skins meters, after them, with no label in front', async ($, on) => {
   const { files } = computer(on)
   files.gh = QUOTA_ANSWER
   on('ui.render', () => skinsBand())
   await $.session.start(START)
   await settle()
   const desktop = await mountBand($, 'desktop')
-  expect(await desktop.find({ type: 'Text', text: 'claude' })).toBeDefined()
+  expect(await desktop.find({ type: 'Text', text: 'claude' })).toBeUndefined()
   expect(await desktop.find({ type: 'Text', text: '42% context' })).toBeDefined()
   expect(await desktop.find({ type: 'Svg' })).toBeDefined()
   await desktop.unmount()
@@ -257,6 +257,6 @@ test('the copilot ring joins the skins meters, with claude leading them', async 
   expect(await terminal.find({ type: 'Text', text: '█░░░░░░░' })).toBeDefined()
   expect(await terminal.find({ type: 'Text', text: '███░░░░░' })).toBeDefined()
   expect(await terminal.find({ type: 'Text', text: '▰▰▰▱▱▱▱▱' })).toBeUndefined()
-  expect(await terminal.find({ type: 'Text', text: 'claude' })).toBeDefined()
+  expect(await terminal.find({ type: 'Text', text: ' 11% gh · reset 1 Dec' })).toBeDefined()
   await terminal.unmount()
 })
