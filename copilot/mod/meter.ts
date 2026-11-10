@@ -77,6 +77,8 @@ const FONT = "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter, sans-s
 export const RING_COLOR = PALETTE.accent;
 // The `claude` label before skins' rings, in Claude's own coral (build choice).
 export const CLAUDE_LABEL = "#d97757";
+// The key on the Copilot row when it is drawn on its own (no skins band beneath this hook).
+export const COPILOT_ROW_KEY = "crosstalk-copilot";
 const SETTLED = ".fill{animation:none!important}";
 
 const ringColor = (percent: number): string => (percent >= 95 ? PALETTE.red : percent >= 80 ? PALETTE.orange : RING_COLOR);

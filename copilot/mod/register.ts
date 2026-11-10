@@ -20,7 +20,7 @@ import { captureContext } from "./capture.ts";
 import type { Who } from "./capture.ts";
 import { isPerson } from "./engine.ts";
 import type { Engine, On, Origin } from "./engine.ts";
-import { blockBars, CLAUDE_LABEL, intoBand, isLive, PALETTE, pickShown, ringLine, ringPercent, ringSvg, taskPieces, UNAVAILABLE } from "./meter.ts";
+import { blockBars, CLAUDE_LABEL, COPILOT_ROW_KEY, intoBand, isLive, PALETTE, pickShown, ringLine, ringPercent, ringSvg, taskPieces, UNAVAILABLE } from "./meter.ts";
 import type { Piece } from "./meter.ts";
 
 // What Crosstalk hands over at session start: its shared folder, and this session as it is now.
@@ -144,7 +144,9 @@ export function registerCopilot(on: On): void {
     if (joined.joined) {
       return joined.node;
     }
-    const row = Box({ paddingX: 1, flexDirection: "row", alignItems: "center", columnGap: 3, children: mine });
+    // Keyed, so a mod drawn around this one (token-ledger) can lift it into the skins band when
+    // skins draws its band after this hook and the join above found nothing.
+    const row = Box({ key: COPILOT_ROW_KEY, paddingX: 1, flexDirection: "row", alignItems: "center", columnGap: 3, children: mine });
     return base ? Box({ flexDirection: "column", children: [base, row] }) : row;
   });
 }
