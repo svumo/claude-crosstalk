@@ -261,6 +261,15 @@ test('a task from the crosstalk_gh tool starts at once with the pictures it name
   expect(calls.some((c) => c[0] === 'node' && String(c[1]).endsWith('/copilot/sidecar/main.ts') && c[2] === 'start')).toBe(true)
 })
 
+test('the crosstalk_gh tool cuts the task from the folder it names, not the session\'s own', async ($, on) => {
+  const { calls } = computer(on)
+  await $.session.start(START)
+  await $.tool.call({ tool: 'mcp__crosstalk__crosstalk_gh', args: 'Fix the meter', folder: 'C:/code/proj/.claude/worktrees/wt' } as never)
+  const gits = calls.filter((c) => c[0] !== 'node' && c[1] === '-C').map((c) => slash(c[2]))
+  expect(gits.length).toBeGreaterThan(0)
+  expect(gits.every((p) => p === 'C:/code/proj/.claude/worktrees/wt')).toBe(true)
+})
+
 test('stop asks a running task to stop, and says so of one that has ended', async ($, on) => {
   const { files } = computer(on)
   await $.session.start(START)

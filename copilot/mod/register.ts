@@ -29,6 +29,8 @@ export type Host = { root: string; who: () => (Who & { address: string }) | null
 // The slash command, and the tool that lets Claude run the same command line.
 export const COMMAND = "crosstalk-gh";
 export const GH_TOOL = "mcp__crosstalk__crosstalk_gh";
+// What the tool adds to the command line: picture files, and the checkout to cut the task from.
+type ToolInput = { images: string[]; folder: string };
 
 const NODE_NEEDED = [22, 18] as const;
 const SHOWN_TASKS = 10;
@@ -90,7 +92,7 @@ export function registerCopilot(on: On): void {
 
   on("tool.call", { tool: GH_TOOL }, async ($, e) => {
     const images = Array.isArray(e.images) ? e.images.map(String).filter((p) => p !== "") : [];
-    return { result: await copilotCommand($, String(e.args ?? ""), CLAUDE_TOOL, images.length > 0 ? images : undefined) };
+    return { result: await copilotCommand($, String(e.args ?? ""), CLAUDE_TOOL, { images, folder: typeof e.folder === "string" ? e.folder.trim() : "" }) };
   });
 
   on("tool.call", { tool: "Edit" }, async (_$, e, next) => {
@@ -178,6 +180,7 @@ export async function startCopilot($: Engine, given: Host): Promise<void> {
       properties: {
         args: { type: "string", description: "Everything after /crosstalk-gh, e.g. \"status\" or \"--bypass fix the login bug\"" },
         images: { type: "array", items: { type: "string" }, description: "With a task: absolute paths of up to 10 png, jpg, gif or webp pictures for Copilot. They are put in its worktree and Copilot is told to open them." },
+        folder: { type: "string", description: "With a task: the git checkout to cut Copilot's branch from, such as the worktree you are working in. Leave it out for the folder this session started in." },
       },
       required: ["args"],
     },
@@ -225,7 +228,7 @@ async function nodeFault($: Engine): Promise<string> {
   return isEnough ? "" : `${need}; this computer has ${ran.stdout.trim()}.`;
 }
 
-async function handOver($: Engine, root: string, me: Who & { address: string }, task: string, picked: { mode?: Mode; model?: string } = {}, files?: string[]): Promise<string> {
+async function handOver($: Engine, root: string, me: Who & { address: string }, task: string, picked: { mode?: Mode; model?: string } = {}, fromTool?: ToolInput): Promise<string> {
   const secrets = secretsIn(task);
   if (secrets.length > 0) {
     return `Not sent: the task holds what looks like ${secrets.join(" and ")}. Take it out and try again.`;
@@ -234,7 +237,7 @@ async function handOver($: Engine, root: string, me: Who & { address: string }, 
   if (fault !== "") {
     return fault;
   }
-  const captured = await captureContext($, me, touched);
+  const captured = await captureContext($, me, touched, fromTool?.folder ?? "");
   if (!captured.context) {
     return captured.error ?? "This session's context could not be read.";
   }
@@ -253,9 +256,9 @@ async function handOver($: Engine, root: string, me: Who & { address: string }, 
     const started = await $.process.run(["node", `${$.plugin.root}/copilot/sidecar/main.ts`, "start", id, "--root", root], { timeoutMs: 30_000 }).catch(() => null);
     return started && started.exitCode === 0 ? "" : `Couldn't start Copilot task ${id}${started?.stderr ? `: ${started.stderr.trim().slice(0, 300)}` : "."}`;
   };
-  if (files) {
-    // Claude's tool names its pictures as files, so the task starts now with them.
-    const saved = await copyPictures($, paths.attachments, files);
+  if (fromTool) {
+    // Nothing is pasted with a tool call, so the task starts now, with any pictures it names.
+    const saved = await copyPictures($, paths.attachments, fromTool.images);
     if (saved.error) {
       return saved.error;
     }
@@ -537,7 +540,7 @@ async function setModel($: Engine, root: string, model: string, origin: Origin):
   return model === "default" ? "New Copilot tasks use Copilot's own default model." : `New Copilot tasks use ${model}.`;
 }
 
-async function copilotCommand($: Engine, args: string, origin: Origin, images?: string[]): Promise<string> {
+async function copilotCommand($: Engine, args: string, origin: Origin, fromTool?: ToolInput): Promise<string> {
   const me = host?.who() ?? null;
   if (!host || !me) {
     return "Crosstalk did not start in this session.";
@@ -577,6 +580,6 @@ async function copilotCommand($: Engine, args: string, origin: Origin, images?: 
       if ((command.mode || command.model) && !mayControl(origin)) {
         return "Only you can pick a Copilot task's mode or model: type the command yourself.";
       }
-      return handOver($, host.root, me, command.task, { ...(command.mode ? { mode: command.mode } : {}), ...(command.model ? { model: command.model } : {}) }, images);
+      return handOver($, host.root, me, command.task, { ...(command.mode ? { mode: command.mode } : {}), ...(command.model ? { model: command.model } : {}) }, fromTool);
   }
 }

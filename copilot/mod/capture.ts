@@ -88,8 +88,9 @@ function inRepo(paths: readonly string[], repoRoot: string): string[] {
   return paths.map(slashes).filter((p) => p.toLowerCase().startsWith(root)).map((p) => p.slice(root.length)).slice(-MAX_TOUCHED);
 }
 
-export async function captureContext($: Engine, who: Who, touched: readonly string[]): Promise<{ context?: SessionContext; error?: string }> {
-  const cwd = slashes(await $.session.cwd());
+// `folder` is the checkout Claude's tool named; else the session's own folder.
+export async function captureContext($: Engine, who: Who, touched: readonly string[], folder = ""): Promise<{ context?: SessionContext; error?: string }> {
+  const cwd = slashes(folder || (await $.session.cwd()));
   const roots = await git($, cwd, ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"]);
   if (roots === null) {
     return { error: `Copilot tasks need a git repository, and ${cwd} is not in one.` };
