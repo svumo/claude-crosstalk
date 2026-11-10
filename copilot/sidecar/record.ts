@@ -15,7 +15,7 @@ export function makeLog(file: string, taskId: string): Log {
   };
 }
 
-export type Audit = (what: "task" | "request" | "decision" | "breach" | "outcome", fields: Record<string, unknown>) => void;
+export type Audit = (what: "task" | "request" | "decision" | "breach" | "outcome" | "mode", fields: Record<string, unknown>) => void;
 
 export function makeAudit(root: string, taskId: string): Audit {
   return (what, fields) => {

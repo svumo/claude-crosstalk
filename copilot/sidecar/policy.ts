@@ -4,7 +4,7 @@
 
 import type { PermissionAsk } from "../backend/adapter.ts";
 import { isInside } from "../context/git.ts";
-import type { PermissionRequestBody, ToolKind } from "../protocol/schema.ts";
+import type { Mode, PermissionRequestBody, ToolKind } from "../protocol/schema.ts";
 
 export type Grant =
   | { kind: "read" | "write"; within: "worktree" }
@@ -66,7 +66,16 @@ export function classify(ask: PermissionAsk, paths: string[], worktree: string):
   }
 }
 
-const sameGrant = (a: Grant, b: Grant): boolean => JSON.stringify(a) === JSON.stringify(b);
+// Whether the task's mode approves this request without asking: bypass approves everything, auto
+// the reads and writes that stay inside the worktree, ask nothing.
+export function autoApproves(mode: Mode, request: Pick<Classified, "tool_kind" | "scope">): boolean {
+  if (mode === "bypass") {
+    return true;
+  }
+  return mode === "auto" && (request.tool_kind === "read" || request.tool_kind === "write") && request.scope === "worktree";
+}
+
+const sameGrant =(a: Grant, b: Grant): boolean => JSON.stringify(a) === JSON.stringify(b);
 
 // Whether a grant given earlier in this task covers this request exactly.
 export function isCovered(grants: readonly Grant[], request: Classified): boolean {

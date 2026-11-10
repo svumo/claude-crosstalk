@@ -13,7 +13,7 @@ import { AcpBackend } from "../../copilot/backend/acp.ts";
 import { taskPaths } from "../../copilot/protocol/layout.ts";
 import type { TaskStateFile } from "../../copilot/protocol/layout.ts";
 import { makeEnvelope } from "../../copilot/protocol/schema.ts";
-import type { Caps, Decision, Envelope, PermissionRequestBody, ReplyBody, TaskBody } from "../../copilot/protocol/schema.ts";
+import type { Caps, Decision, Envelope, Mode, PermissionRequestBody, ReplyBody, TaskBody } from "../../copilot/protocol/schema.ts";
 import { DEFAULT_CAPS } from "../../copilot/sidecar/budget.ts";
 import { childEnv } from "../../copilot/sidecar/env.ts";
 import { DEFAULT_CONFIG, runTask } from "../../copilot/sidecar/task.ts";
@@ -40,12 +40,12 @@ function world(taskId: string): World {
   return { root: `${base}/crosstalk`, repo, sha: git(repo, "rev-parse", "HEAD"), taskId };
 }
 
-function handOver(w: World, task: string, caps: Partial<Caps> = {}): void {
+function handOver(w: World, task: string, caps: Partial<Caps> = {}, mode?: Mode): void {
   const paths = taskPaths(w.root, w.taskId);
   mkdirSync(paths.dir, { recursive: true });
   const envelope = makeEnvelope<TaskBody>({
     id: "m1", thread_id: "t1", from: "default/app-ab12", fromId: ORIGIN, to: `copilot/${w.taskId}`, sent_at: Date.now(), kind: "task",
-    body: { task_id: w.taskId, task, model: "claude-sonnet-5.5" }, text: task, caps: { ...DEFAULT_CAPS, ...caps },
+    body: { task_id: w.taskId, task, model: "claude-sonnet-5.5", ...(mode ? { mode } : {}) }, text: task, caps: { ...DEFAULT_CAPS, ...caps },
     context: {
       context_version: 1, captured_at: Date.now(), cwd: w.repo,
       git: { repo_root: w.repo, main_root: w.repo, is_worktree: false, branch: "main", head_sha: w.sha, remote: "", dirty: { staged: 0, unstaged: 0, untracked: 0, paths: [] }, worktrees: [] },
@@ -146,6 +146,48 @@ test("a decision file that does not say a person decided is not an answer", asyn
   await runTask(options(w, { permissionTimeoutMs: 700 }));
   clearInterval(forger);
   assert.equal(existsSync(`${w.repo}-copilot/${w.taskId}/copilot-was-here.txt`), false);
+});
+
+test("a bypass task is never asked: every request is approved by policy and none reaches the person", async () => {
+  const w = world("bypass-mmmm");
+  handOver(w, "Add the file", {}, "bypass");
+  assert.equal(await runTask(options(w)), "completed");
+  assert.equal(readFileSync(`${w.repo}-copilot/${w.taskId}/copilot-was-here.txt`, "utf8"), "hello\n");
+  assert.deepEqual(inbox(w).map((m) => m.kind), ["reply"]);
+  assert.match(audit(w), /"decision":"approve","decided_by":"policy"/);
+  assert.match(audit(w), /"what":"task"[^\n]*"mode":"bypass"/);
+  assert.equal(state(w).mode, "bypass");
+});
+
+test("auto approves a write inside the worktree, and still asks before a shell command", async () => {
+  const w = world("auto-nnnn");
+  handOver(w, "Add the file", {}, "auto");
+  assert.equal(await runTask(options(w)), "completed");
+  assert.equal(existsSync(`${w.repo}-copilot/${w.taskId}/copilot-was-here.txt`), true);
+  assert.deepEqual(inbox(w).map((m) => m.kind), ["reply"]);
+  const s = world("auto-shell-oooo");
+  handOver(s, "[shell] Run the tests", {}, "auto");
+  const p = person(s, () => "deny");
+  await runTask(options(s));
+  p.stop();
+  assert.equal(p.seen[0]?.tool_kind, "shell");
+});
+
+test("switching a waiting task to bypass approves the request it is waiting on", async () => {
+  const w = world("switch-pppp");
+  handOver(w, "Add the file");
+  const paths = taskPaths(w.root, w.taskId);
+  const switcher = setInterval(() => {
+    if (existsSync(`${paths.requests}/r1.json`)) {
+      writeFileSync(paths.mode, JSON.stringify({ mode: "bypass", at: Date.now() }));
+    }
+  }, 50);
+  assert.equal(await runTask(options(w)), "completed");
+  clearInterval(switcher);
+  assert.equal(existsSync(`${w.repo}-copilot/${w.taskId}/copilot-was-here.txt`), true);
+  assert.match(audit(w), /"what":"mode"[^\n]*"mode":"bypass"/);
+  assert.match(audit(w), /"decision":"approve","decided_by":"policy"/);
+  assert.equal(state(w).mode, "bypass");
 });
 
 test("a tool that runs without asking stops the task for safety", async () => {

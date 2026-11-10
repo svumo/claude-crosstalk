@@ -38,7 +38,14 @@ export type Usage = {
   credits: number | null;
 };
 
-export type TaskBody = { task_id: string; task: string; model?: string };
+// How much of Copilot's asking the person has handed to the broker: "ask" sends every gated
+// request to them, "auto" approves reads and writes inside the task's worktree, "bypass" approves
+// everything. Only the person's own command sets it.
+export const MODES = ["ask", "auto", "bypass"] as const;
+export type Mode = (typeof MODES)[number];
+export const isMode = (value: unknown): value is Mode => MODES.includes(value as Mode);
+
+export type TaskBody = { task_id: string; task: string; model?: string; mode?: Mode };
 
 export type ReplyBody = {
   task_id: string;

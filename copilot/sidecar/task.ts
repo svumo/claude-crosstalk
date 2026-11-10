@@ -13,8 +13,8 @@ import type { TaskPaths, TaskStateFile } from "../protocol/layout.ts";
 import { movedLine } from "../protocol/quota.ts";
 import type { Quota } from "../protocol/quota.ts";
 import { permissionText, replyText } from "../protocol/render.ts";
-import { emptyUsage, fromV0, makeEnvelope, parseEnvelope } from "../protocol/schema.ts";
-import type { Caps, Envelope, PermissionRequestBody, ReplyBody, TaskBody, TaskState, Usage } from "../protocol/schema.ts";
+import { emptyUsage, fromV0, isMode, makeEnvelope, parseEnvelope } from "../protocol/schema.ts";
+import type { Caps, Envelope, Mode, PermissionRequestBody, ReplyBody, TaskBody, TaskState, Usage } from "../protocol/schema.ts";
 import { Broker } from "./broker.ts";
 import { addTurn, DEFAULT_CAPS, spent } from "./budget.ts";
 import { privateDir, readJson, writeJson } from "./files.ts";
@@ -30,6 +30,8 @@ import type { Worktree } from "./worktree.ts";
 
 export type TaskConfig = {
   model: string;
+  // The permission mode a task starts in when its handoff names none.
+  mode: Mode;
   worktreeRoot: string;
   // How long a permission request waits for the person before it is denied.
   permissionTimeoutMs: number;
@@ -38,7 +40,7 @@ export type TaskConfig = {
   idleMs: number;
 };
 
-export const DEFAULT_CONFIG: TaskConfig = { model: "", worktreeRoot: "", permissionTimeoutMs: 10 * 60_000, turnTimeoutMs: 30 * 60_000, idleMs: 10 * 60_000 };
+export const DEFAULT_CONFIG: TaskConfig = { model: "", mode: "ask", worktreeRoot: "", permissionTimeoutMs: 10 * 60_000, turnTimeoutMs: 30 * 60_000, idleMs: 10 * 60_000 };
 
 export type TaskOptions = {
   root: string;
@@ -96,6 +98,21 @@ class TaskRun {
   private readonly options: TaskOptions;
   // GitHub's meter at the last reading: before the task, then after each turn.
   private meterAt: Quota | null = null;
+  private startMode: Mode = "ask";
+
+  // The mode now: the one the person last switched this task to (mode.json), else the one it
+  // started in. A change is written to the state file and the audit as it is first seen.
+  private mode(): Mode {
+    const file = readJson(this.paths.mode) as { mode?: unknown } | null;
+    const mode = isMode(file?.mode) ? file.mode : this.startMode;
+    if (mode !== this.state.mode) {
+      this.audit("mode", { mode });
+      this.events.add("permission", `mode: ${mode}`, { mode });
+      this.state = { ...this.state, mode, updated_at: Date.now() };
+      writeJson(this.paths.state, this.state);
+    }
+    return mode;
+  }
 
   private async readMeter(): Promise<Quota | null> {
     return this.options.readQuota ? this.options.readQuota().catch(() => null) : null;
@@ -120,7 +137,7 @@ class TaskRun {
     this.events = new EventLog(this.paths, options.taskId);
     this.state = {
       task_id: options.taskId, state: "starting", detail: "", task: "", origin_id: "", origin_address: "", branch: "", worktree: "",
-      backend: options.backendName, model: options.config.model, usage: this.usage, pending: [], started_at: Date.now(), updated_at: Date.now(), pid: process.pid,
+      backend: options.backendName, model: options.config.model, mode: options.config.mode, usage: this.usage, pending: [], started_at: Date.now(), updated_at: Date.now(), pid: process.pid,
     };
   }
 
@@ -169,6 +186,8 @@ class TaskRun {
     this.caps = { ...DEFAULT_CAPS, ...task.caps };
     const model = task.body.model ?? this.options.config.model;
     this.state.model = model;
+    this.startMode = isMode(task.body.mode) ? task.body.mode : this.options.config.mode;
+    this.state.mode = this.startMode;
     const checked = checkContext(task.context);
     if (!checked.ok) {
       return this.refuse(task, `The handoff was refused: ${checked.error}.`);
@@ -178,7 +197,7 @@ class TaskRun {
       return this.refuse(task, `The handoff was refused: the task text holds what looks like ${secrets.join(" and ")}. Take it out and send the task again.`);
     }
     const context = checked.context;
-    this.audit("task", { from: task.from, task: task.body.task, base: context.git.head_sha, model });
+    this.audit("task", { from: task.from, task: task.body.task, base: context.git.head_sha, model, mode: this.startMode });
     // Read before the self-test, which is a prompt of its own.
     this.meterAt = await this.readMeter();
 
@@ -237,6 +256,7 @@ class TaskRun {
 
     this.broker = new Broker({
       taskId: this.options.taskId, paths: this.paths, worktree: tree.path, timeoutMs: this.options.config.permissionTimeoutMs, tripwire: this.tripwire, audit: this.audit,
+      mode: () => this.mode(),
       onRequest: (request) => this.ask(task, request),
       onSettled: (request, decision, by) => {
         this.events.add("permission", `${decision} (${by})`, { request_id: request.request_id });

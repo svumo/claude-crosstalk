@@ -10,7 +10,8 @@ import type { DecisionFile, TaskPaths } from "../protocol/layout.ts";
 import { DECISIONS } from "../protocol/schema.ts";
 import type { Decider, Decision, PermissionRequestBody } from "../protocol/schema.ts";
 import { readJson, remove, resolveReal, writeJson } from "./files.ts";
-import { classify, isCovered } from "./policy.ts";
+import type { Mode } from "../protocol/schema.ts";
+import { autoApproves, classify, isCovered } from "./policy.ts";
 import type { Grant } from "./policy.ts";
 import type { Audit } from "./record.ts";
 import type { Tripwire } from "./tripwire.ts";
@@ -26,6 +27,9 @@ export type BrokerOptions = {
   timeoutMs: number;
   tripwire: Tripwire;
   audit: Audit;
+  // The task's permission mode now; read on each request and while one waits, as the person may
+  // switch it mid-task. Absent: "ask".
+  mode?: () => Mode;
   // Tells the person a request is waiting (the originating session's inbox, the event log).
   onRequest: (request: PermissionRequestBody) => void;
   onSettled: (request: PermissionRequestBody, decision: Decision, by: Decider) => void;
@@ -52,6 +56,10 @@ export class Broker {
     this.options = options;
   }
 
+  private mode(): Mode {
+    return this.options.mode?.() ?? "ask";
+  }
+
   get pending(): string[] {
     return [...this.open];
   }
@@ -69,7 +77,7 @@ export class Broker {
     this.count += 1;
     const request: PermissionRequestBody = { task_id: taskId, request_id: `r${this.count}`, ...shown, expires_at: Date.now() + this.options.timeoutMs };
     audit("request", { ...request });
-    if (isCovered(this.grants, classified)) {
+    if (isCovered(this.grants, classified) || autoApproves(this.mode(), classified)) {
       return this.settle(request, ask, "approve", "policy");
     }
     if (this.isClosed) {
@@ -87,6 +95,12 @@ export class Broker {
       if (answer) {
         decision = answer.decision;
         by = answer.decided_by;
+        break;
+      }
+      // The person switched the task's mode while this request waited.
+      if (autoApproves(this.mode(), classified)) {
+        decision = "approve";
+        by = "policy";
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, POLL_MS));

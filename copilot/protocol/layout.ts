@@ -7,10 +7,11 @@
 //   <root>/copilot/tasks/<task id>/requests/<id>.json   a permission request waiting for the person
 //   <root>/copilot/tasks/<task id>/decisions/<id>.json  the person's answer to it
 //   <root>/copilot/tasks/<task id>/stop                 asks the sidecar to stop
+//   <root>/copilot/tasks/<task id>/mode.json            the permission mode the person switched it to
 //   <root>/copilot/tasks/<task id>/sidecar.log          the sidecar's own log
 //   <root>/copilot/audit/<yyyy-mm-dd>.jsonl             every task, request and decision
 
-import type { Decision, Decider, TaskState, Usage } from "./schema.ts";
+import type { Decision, Decider, Mode, TaskState, Usage } from "./schema.ts";
 
 const tidy = (path: string): string => path.replace(/\\/g, "/").replace(/\/+$/, "");
 
@@ -22,8 +23,12 @@ export type TaskPaths = {
   requests: string;
   decisions: string;
   stop: string;
+  mode: string;
   log: string;
 };
+
+// What mode.json holds.
+export type ModeFile = { mode: Mode; at: number };
 
 export function taskPaths(root: string, taskId: string): TaskPaths {
   const dir = `${tidy(root)}/copilot/tasks/${taskId}`;
@@ -35,6 +40,7 @@ export function taskPaths(root: string, taskId: string): TaskPaths {
     requests: `${dir}/requests`,
     decisions: `${dir}/decisions`,
     stop: `${dir}/stop`,
+    mode: `${dir}/mode.json`,
     log: `${dir}/sidecar.log`,
   };
 }
@@ -55,6 +61,8 @@ export type TaskStateFile = {
   worktree: string;
   backend: string;
   model: string;
+  // Absent in state files written before modes.
+  mode?: Mode;
   usage: Usage;
   pending: string[];
   started_at: number;

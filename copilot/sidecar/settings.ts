@@ -1,6 +1,7 @@
 // The sidecar's settings, from <root>/copilot/config.json, and which backend follows from them.
 // The backend comes from here and never from a task, so a handoff cannot name a program to run.
 
+import { isMode } from "../protocol/schema.ts";
 import { readJson } from "./files.ts";
 import { DEFAULT_CONFIG } from "./task.ts";
 import type { TaskConfig } from "./task.ts";
@@ -18,6 +19,7 @@ export function readSettings(root: string): Settings {
   const command = Array.isArray(saved.backendCommand) ? saved.backendCommand.filter((word): word is string => typeof word === "string" && word !== "") : [];
   return {
     model: typeof saved.model === "string" ? saved.model : DEFAULT_CONFIG.model,
+    mode: isMode(saved.mode) ? saved.mode : DEFAULT_CONFIG.mode,
     worktreeRoot: typeof saved.worktreeRoot === "string" ? saved.worktreeRoot : DEFAULT_CONFIG.worktreeRoot,
     permissionTimeoutMs: positive(saved.permissionTimeoutMs, DEFAULT_CONFIG.permissionTimeoutMs),
     turnTimeoutMs: positive(saved.turnTimeoutMs, DEFAULT_CONFIG.turnTimeoutMs),
