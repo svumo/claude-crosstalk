@@ -26,8 +26,10 @@ export function worktreeRoot(mainRoot: string, configured?: string): string {
 export type Worktree = { path: string; branch: string };
 
 export async function createWorktree(mainRoot: string, root: string, taskId: string, baseSha: string): Promise<Worktree> {
-  const exists = await git(mainRoot, ["cat-file", "-e", `${baseSha}^{commit}`]);
-  if (exists.code !== 0) {
+  // The object's type, asked with no special characters: MSYS2 builds of git (devkitPro's, for
+  // one) expand braces in their arguments, so `<sha>^{commit}` reached git as `<sha>^commit`.
+  const exists = await git(mainRoot, ["cat-file", "-t", baseSha]);
+  if (exists.code !== 0 || exists.stdout.trim() !== "commit") {
     throw new Error(`commit ${baseSha.slice(0, 12)} is not in ${mainRoot}`);
   }
   mkdirSync(root, { recursive: true });
