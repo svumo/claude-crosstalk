@@ -155,13 +155,13 @@ export function registerCopilot(on: On): void {
     const taskRow = shown
       ? Box({ key: `${COPILOT_ROW_KEY}-task`, paddingX: 1, flexDirection: "row", alignItems: "center", children: [pieces(taskPieces(shown, tickedAt, e.props?.bodyColumns ?? 80))] })
       : null;
-    // Among skins' context / 5h / 7d rings when its band is drawn, the task on a row under them
-    // (never beside Compact); else rows of its own. In the terminal skins' bars are redrawn in the
-    // same blocks as Copilot's.
+    // The ring goes among skins' context / 5h / 7d rings when its band is drawn; the task is never
+    // in that row but on a line of its own right under the whole band. Else rows of its own. In the
+    // terminal skins' bars are redrawn in the same blocks as Copilot's.
     const base = e.surface === "terminal" ? blockBars(theirs) : theirs;
-    const joined = intoBand(base, mine, [], taskRow);
+    const joined = intoBand(base, mine);
     if (joined.joined) {
-      return joined.node;
+      return taskRow ? Box({ flexDirection: "column", children: [joined.node, taskRow] }) : joined.node;
     }
     // Keyed, so a mod drawn around this one (token-ledger) can lift it into the skins band when
     // skins draws its band after this hook and the join above found nothing.

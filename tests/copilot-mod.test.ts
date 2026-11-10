@@ -389,13 +389,17 @@ test('the copilot task sits on its own row under the rings, never beside Compact
   await settle()
   for (const surface of ['desktop', 'terminal']) {
     const m = await mountBand($, surface)
-    const task = await m.find({ type: 'Text', text: '✓' })
-    expect(task).toBeDefined()
-    const band: any = await m.find({ type: 'Box', props: { flexDirection: 'column' } } as never)
-    const [compactRow, taskRow] = band.children.map((c: unknown) => JSON.stringify(c))
-    expect(compactRow).toContain('Compact')
-    expect(compactRow).not.toContain('✓')
+    expect(await m.find({ type: 'Text', text: '✓' })).toBeDefined()
+    // [band, task row]: the band (rings row with Compact) holds no task piece.
+    const outer: any = await m.find({ type: 'Box', props: { flexDirection: 'column' } } as never)
+    expect(outer.children).toHaveLength(2)
+    const [band, taskRow] = outer.children.map((c: unknown) => JSON.stringify(c))
+    expect(band).toContain('Compact')
+    expect(band).toContain('42% context')
+    expect(band).not.toContain('✓')
+    expect(outer.children[1].props.key).toBe('crosstalk-copilot-task')
     expect(taskRow).toContain('✓')
+    expect(taskRow).not.toContain('Compact')
     await m.unmount()
   }
 })
