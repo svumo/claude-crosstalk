@@ -66,6 +66,10 @@ let me = null;
 let root = null;
 let isOff = false;
 let isBusy = false;
+// Set while a turn that a Crosstalk message started is running: "quiet" when that turn's end
+// isn't worth a notification (the arrival toast already said a message came), "end" when it
+// carries a Copilot task's result, which is a run finishing. Null for a turn the person started.
+let wakeTurn = null;
 let isPolling = false;
 let wakes = 0;
 let warned = false;
@@ -146,8 +150,14 @@ export function register(on) {
       openTools = 0;
       mainTurn = null;
       endTurn();
+      const woke = wakeTurn;
+      wakeTurn = null;
       void poll($);
-      void notifyWindow($, "finished");
+      // Only a turn the person started, or one that brought a Copilot run's result, notifies on
+      // its end (build choice): other wake-up turns would ping on every message.
+      if (woke !== "quiet") {
+        void notifyWindow($, "finished");
+      }
     }
     return result;
   });
@@ -1418,10 +1428,12 @@ async function poll($) {
     }
     wakes += 1;
     isBusy = true; // until turn.complete; a person's typing in the meantime queues as usual
+    wakeTurn = batch.some((m) => m.kind === "reply" && String(m.from ?? "").startsWith("copilot/")) ? "end" : "quiet";
     noteArrival($, batch);
     await markDelivered($, batch);
     void $.prompt.submit({ text: frameMessages(batch) }).catch(() => {
       isBusy = false;
+      wakeTurn = null;
       return unmark($, batch);
     });
   } finally {
