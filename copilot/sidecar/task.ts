@@ -10,6 +10,8 @@ import { checkContext, contextNote, secretsIn } from "../context/minimise.ts";
 import type { SessionContext } from "../context/types.ts";
 import { taskPaths } from "../protocol/layout.ts";
 import type { TaskPaths, TaskStateFile } from "../protocol/layout.ts";
+import { movedLine } from "../protocol/quota.ts";
+import type { Quota } from "../protocol/quota.ts";
 import { permissionText, replyText } from "../protocol/render.ts";
 import { emptyUsage, fromV0, makeEnvelope, parseEnvelope } from "../protocol/schema.ts";
 import type { Caps, Envelope, PermissionRequestBody, ReplyBody, TaskBody, TaskState, Usage } from "../protocol/schema.ts";
@@ -45,6 +47,8 @@ export type TaskOptions = {
   makeBackend: (model: string) => CopilotBackend;
   config: TaskConfig;
   env: Record<string, string>;
+  // GitHub's account meter now, or null when it cannot be read. Absent: the result says nothing of it.
+  readQuota?: () => Promise<Quota | null>;
 };
 
 const SUMMARY_CHARS = 6_000;
@@ -90,6 +94,20 @@ class TaskRun {
   private peer: Peer | null = null;
   private broker: Broker | null = null;
   private readonly options: TaskOptions;
+  // GitHub's meter at the last reading: before the task, then after each turn.
+  private meterAt: Quota | null = null;
+
+  private async readMeter(): Promise<Quota | null> {
+    return this.options.readQuota ? this.options.readQuota().catch(() => null) : null;
+  }
+
+  // How far GitHub's meter moved since the last reading, in words ("" when it can't be read).
+  private async meterMoved(): Promise<string> {
+    const now = await this.readMeter();
+    const line = movedLine(this.meterAt, now);
+    this.meterAt = now ?? this.meterAt;
+    return line;
+  }
 
   constructor(options: TaskOptions) {
     this.options = options;
@@ -161,6 +179,8 @@ class TaskRun {
     }
     const context = checked.context;
     this.audit("task", { from: task.from, task: task.body.task, base: context.git.head_sha, model });
+    // Read before the self-test, which is a prompt of its own.
+    this.meterAt = await this.readMeter();
 
     // No version of the backend gets a task before it has shown that it asks first.
     const tested = await selfTest(this.options.makeBackend(model), this.options.env, `${this.options.root}/copilot/selftest.json`);
@@ -189,7 +209,9 @@ class TaskRun {
       const moved = (await statusText(context.cwd)) === originBefore ? "" : "Note: the uncommitted state of the checkout you started from changed while the task ran. That may be your own edits; check it if not.";
       const notes = [detailOf(end), extra, uncommitted, moved].filter(Boolean).join("\n");
       const said = end.said.trim().slice(-SUMMARY_CHARS);
+      const meter = await this.meterMoved();
       this.reply(task, {
+        ...(meter ? { meter } : {}),
         task_id: this.options.taskId, outcome: OUTCOME[end.kind], summary: [said, notes].filter(Boolean).join("\n\n"),
         diff_stat: await diffStat(context.git.main_root, context.git.head_sha, tree.branch), branch: tree.branch, worktree: tree.path,
         base_sha: context.git.head_sha, commands: mergeBackCommands(context.git.main_root, tree, context.git.head_sha), usage: this.usage,

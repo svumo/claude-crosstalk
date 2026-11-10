@@ -6,7 +6,12 @@ export type RunResult = { exitCode: number; stdout: string; stderr: string };
 
 export type Engine = {
   plugin: { root: string };
-  ui: { toast(text: string): void; log(text: string): void };
+  ui: {
+    toast(text: string): void;
+    log(text: string): void;
+    invalidate(event: string): void;
+    resolve(e: unknown): { Box: (props: Record<string, unknown>) => unknown; Text: (props: Record<string, unknown>) => unknown };
+  };
   command: { register(spec: { name: string; description: string; argumentHint?: string }): Promise<unknown> };
   fs: {
     read(path: string): Promise<string>;
@@ -16,7 +21,7 @@ export type Engine = {
   };
   process: { run(argv: readonly string[], init?: { cwd?: string; timeoutMs?: number }): Promise<RunResult> };
   env: { get(name: string): Promise<string | undefined> };
-  clock: { now(): Promise<number> };
+  clock: { now(): Promise<number>; every(ms: number, fn: () => unknown): unknown };
   session: { cwd(): Promise<string>; model(): Promise<string> };
 };
 
@@ -33,4 +38,7 @@ type Hook<E, R> = ($: Engine, e: E, next: (e: E) => Promise<R>) => Promise<R> | 
 export type On = {
   (event: "command.run", matcher: { command: string }, hook: Hook<CommandInput, CommandAnswer>): unknown;
   (event: "tool.call", matcher: { tool: string }, hook: Hook<{ file_path?: string; notebook_path?: string }, unknown>): unknown;
+  (event: "ui.render", matcher: { component: string }, hook: Hook<RenderInput, unknown>): unknown;
 };
+
+export type RenderInput = { props?: { bodyColumns?: number; hasSurvey?: boolean } };

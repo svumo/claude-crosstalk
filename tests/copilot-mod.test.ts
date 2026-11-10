@@ -172,7 +172,10 @@ test('only the person answers a request, and the answer is a decision file for t
   expect(await say($, 'approve r1 theirs-bbbb')).toMatch(/This session has no task theirs-bbbb/)
   expect(await say($, 'allow r1')).toBe('Allowed for the rest of the task: r1 of fix-login-x9q2.')
   expect(JSON.parse(files.get(decision))).toEqual({ request_id: 'r1', decision: 'allow_task', decided_by: 'command', at: NOW })
-  expect(await say($, 'status')).toMatch(/^fix-login-x9q2: awaiting approval.*Waiting for you: \/copilot approve r1\.$/)
+  const status = (await say($, 'status')).split('\n')
+  expect(status[0]).toMatch(/^fix-login-x9q2: awaiting approval.*Waiting for you: \/copilot approve r1\.$/)
+  // gh answers nothing on this pretend computer, so the meter line says it couldn't be read.
+  expect(status[1]).toMatch(/^GitHub's Copilot meter could not be read/)
 })
 
 test('stop asks a running task to stop, and says so of one that has ended', async ($, on) => {

@@ -34,6 +34,9 @@ export function replyText(body: ReplyBody): string {
     );
   }
   lines.push("", `Used: ${usageLine(body.usage)}.`);
+  if (body.meter) {
+    lines.push(body.meter);
+  }
   return lines.join("\n");
 }
 

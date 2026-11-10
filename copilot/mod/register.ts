@@ -10,6 +10,8 @@ import { secretsIn } from "../context/minimise.ts";
 import { taskId } from "../protocol/ids.ts";
 import { taskPaths, tasksDir } from "../protocol/layout.ts";
 import type { DecisionFile, TaskStateFile } from "../protocol/layout.ts";
+import { parseQuota, QUOTA_ARGV, quotaLine } from "../protocol/quota.ts";
+import type { Quota } from "../protocol/quota.ts";
 import { makeEnvelope } from "../protocol/schema.ts";
 import type { Decision, TaskBody } from "../protocol/schema.ts";
 import { DEFAULT_CAPS } from "../sidecar/budget.ts";
@@ -18,6 +20,8 @@ import { captureContext } from "./capture.ts";
 import type { Who } from "./capture.ts";
 import { isPerson } from "./engine.ts";
 import type { Engine, On, Origin } from "./engine.ts";
+import { isLive, meterRow, pickShown } from "./meter.ts";
+import type { Piece } from "./meter.ts";
 
 // What Crosstalk hands over at session start: its shared folder, and this session as it is now.
 export type Host = { root: string; who: () => (Who & { address: string }) | null };
@@ -29,6 +33,43 @@ const TOUCHED_MAX = 400;
 let host: Host | null = null;
 // Files this session edited, newest last, for the context a task carries.
 let touched: string[] = [];
+
+// The Copilot row above the prompt. Task files are read every TICK_MS; GitHub's meter every
+// minute while a task runs, else every ten (build choice: often enough to see it move, rarely
+// enough that an idle session barely calls GitHub).
+const TICK_MS = 15_000;
+const LIVE_QUOTA_MS = 60_000;
+const IDLE_QUOTA_MS = 10 * 60_000;
+let quota: Quota | null = null;
+let quotaFailed = false;
+let quotaAt = -Infinity;
+let shown: TaskStateFile | null = null;
+let tickedAt = 0;
+
+async function readQuota($: Engine): Promise<Quota | null> {
+  const ran = await $.process.run([...QUOTA_ARGV], { timeoutMs: 15_000 }).catch(() => null);
+  return ran && ran.exitCode === 0 ? parseQuota(ran.stdout) : null;
+}
+
+// Reads this session's tasks, and GitHub's meter when it is due (or `force`), then redraws.
+async function tick($: Engine, force = false): Promise<void> {
+  const me = host?.who() ?? null;
+  if (!host || !me) {
+    return;
+  }
+  const now = await $.clock.now();
+  tickedAt = now;
+  shown = pickShown(await readStates($, host.root, me.id), now);
+  if (force || now - quotaAt >= (isLive(shown) ? LIVE_QUOTA_MS : IDLE_QUOTA_MS)) {
+    quotaAt = now;
+    const read = await readQuota($);
+    if (read) {
+      quota = read;
+    }
+    quotaFailed = read === null && quota === null;
+  }
+  $.ui.invalidate("ui.render");
+}
 
 function noteEdit(path: unknown): void {
   if (typeof path === "string" && path !== "") {
@@ -53,6 +94,26 @@ export function registerCopilot(on: On): void {
     noteEdit(e.notebook_path);
     return next(e);
   });
+
+  // Stacks under whatever else draws above the prompt (the skins meters, token-ledger), so the
+  // order mods load in does not matter.
+  on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
+    const theirs = await next(e);
+    if (e.props?.hasSurvey) {
+      return theirs;
+    }
+    const row = meterRow(quota, quotaFailed, shown, tickedAt, e.props?.bodyColumns ?? 80);
+    if (!row) {
+      return theirs;
+    }
+    const { Box, Text } = $.ui.resolve(e);
+    const side = (pieces: Piece[]) => Box({
+      flexDirection: "row", columnGap: 1, flexShrink: 0,
+      children: pieces.map((p) => Text({ color: p.color, bold: p.bold === true, children: p.text })),
+    });
+    const mine = Box({ paddingX: 1, flexDirection: "row", columnGap: 4, children: row.right.length > 0 ? [side(row.left), side(row.right)] : [side(row.left)] });
+    return theirs ? Box({ flexDirection: "column", children: [theirs, mine] }) : mine;
+  });
 }
 
 export async function startCopilot($: Engine, given: Host): Promise<void> {
@@ -63,6 +124,12 @@ export async function startCopilot($: Engine, given: Host): Promise<void> {
     description: "Hands a task to GitHub Copilot CLI in its own git worktree. status shows tasks; approve, allow and deny answer its requests; stop ends one.",
     argumentHint: "<task> | status | approve <request> | deny <request> | stop | setup",
   });
+  quota = null;
+  quotaFailed = false;
+  quotaAt = -Infinity;
+  shown = null;
+  $.clock.every(TICK_MS, () => tick($).catch(() => {}));
+  void tick($, true).catch(() => {});
 }
 
 async function readJson($: Engine, path: string): Promise<unknown> {
@@ -192,7 +259,15 @@ async function copilotCommand($: Engine, args: string, origin: Origin): Promise<
     case "status": {
       const states = await readStates($, host.root, me.id);
       const now = await $.clock.now();
-      return states.length === 0 ? "This session has handed Copilot no tasks. /copilot <task> starts one." : states.slice(0, SHOWN_TASKS).map((s) => statusLine(s, now)).join("\n");
+      const fresh = await readQuota($);
+      if (fresh) {
+        quota = fresh;
+        quotaAt = now;
+        quotaFailed = false;
+      }
+      const meter = fresh ? quotaLine(fresh) : "GitHub's Copilot meter could not be read (gh api copilot_internal/user failed; is gh signed in?).";
+      const tasks = states.length === 0 ? "This session has handed Copilot no tasks. /copilot <task> starts one." : states.slice(0, SHOWN_TASKS).map((s) => statusLine(s, now)).join("\n");
+      return `${tasks}\n${meter}`;
     }
     case "setup":
       return runSetup($, host.root, origin);

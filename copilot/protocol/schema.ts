@@ -50,6 +50,8 @@ export type ReplyBody = {
   base_sha: string;
   commands: { review: string; merge: string; discard: string };
   usage: Usage;
+  // How GitHub's account meter moved while the task ran, in words; absent when it could not be read.
+  meter?: string;
 };
 
 export type StatusBody = { task_id: string; state: TaskState; detail?: string };

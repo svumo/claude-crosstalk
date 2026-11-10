@@ -7,7 +7,7 @@
 // Settings come from <root>/copilot/config.json. The backend command comes from there too, never
 // from the task, so a handoff cannot name a program to run.
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { existsSync, openSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,8 @@ import { AcpBackend, copilotAcpCommand } from "../backend/acp.ts";
 import { SdkBackend, sdkEntry } from "../backend/sdk.ts";
 import { isTaskId } from "../protocol/ids.ts";
 import { taskPaths } from "../protocol/layout.ts";
+import { parseQuota, QUOTA_ARGV } from "../protocol/quota.ts";
+import type { Quota } from "../protocol/quota.ts";
 import { childEnv } from "./env.ts";
 import { privateDir } from "./files.ts";
 import { chooseBackend, readSettings } from "./settings.ts";
@@ -28,11 +30,18 @@ function rootFrom(args: string[]): string {
   return (given ?? process.env.CLAUDE_CROSSTALK_DIR ?? `${homedir()}/.claude-crosstalk`).replace(/\\/g, "/").replace(/\/+$/, "");
 }
 
+// GitHub's Copilot meter for the account gh is signed in as. Run with the sidecar's own environment
+// (not the trimmed one Copilot gets), so gh finds its sign-in.
+const readQuota = (): Promise<Quota | null> => new Promise((resolve) => {
+  const [program, ...args] = QUOTA_ARGV;
+  execFile(program, args, { timeout: 15_000, windowsHide: true, maxBuffer: 1024 * 1024 }, (error, stdout) => resolve(error ? null : parseQuota(String(stdout))));
+});
+
 async function run(taskId: string, root: string): Promise<number> {
   const settings = readSettings(root);
   const backendName = chooseBackend(settings, existsSync(sdkEntry(root)));
   const state = await runTask({
-    root, taskId, backendName, config: settings, env: childEnv(process.env),
+    root, taskId, backendName, config: settings, env: childEnv(process.env), readQuota,
     makeBackend: (model) => backendName === "sdk"
       ? new SdkBackend(sdkEntry(root), settings.account)
       : new AcpBackend(settings.backendCommand.length > 0 ? settings.backendCommand : copilotAcpCommand(model || undefined)),
