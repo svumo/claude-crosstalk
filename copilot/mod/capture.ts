@@ -1,6 +1,7 @@
 // Captures the SessionContext of the session that hands a task over: where it is, what git says,
 // and how it is hosted. Taken fresh at every handoff, so a changed folder or branch is never stale.
 
+import { findGit } from "../context/git-exe.ts";
 import { parseStatus, parseWorktrees, STATUS_ARGS, WORKTREE_ARGS } from "../context/git.ts";
 import { detectHost } from "../context/surface.ts";
 import type { HostVariables } from "../context/surface.ts";
@@ -13,8 +14,41 @@ export type Who = { id: string; profile: string; title: string; configDir: strin
 
 const slashes = (path: string): string => path.replace(/\\/g, "/").replace(/\/+$/, "");
 
+// Git for Windows on Windows, found once per session (see context/git-exe.ts). The engine does
+// not say the platform, so Windows is told by its OS variable (build choice).
+let gitExe: Promise<string> | null = null;
+
+// The engine takes only a literal name in $.env.get, so each variable is read by name.
+const first = async (...reads: Promise<string | undefined>[]): Promise<string> => {
+  for (const value of await Promise.all(reads.map((r) => r.catch(() => undefined)))) {
+    if (value) {
+      return value;
+    }
+  }
+  return "";
+};
+
+function gitProgram($: Engine): Promise<string> {
+  gitExe ??= (async () => findGit(
+    {
+      platform: (await first($.env.get("OS"))) === "Windows_NT" ? "win32" : "other",
+      path: await first($.env.get("PATH"), $.env.get("Path")),
+      programFiles: [await first($.env.get("ProgramFiles")), await first($.env.get("ProgramFiles(x86)")), await first($.env.get("ProgramW6432"))],
+      localAppData: await first($.env.get("LOCALAPPDATA"), $.env.get("LocalAppData")),
+    },
+    {
+      exists: async (path) => (await $.fs.stat(path).catch(() => null))?.kind === "file",
+      version: async (path) => {
+        const ran = await $.process.run([path, "--version"], { timeoutMs: 10_000 }).catch(() => null);
+        return ran && ran.exitCode === 0 ? ran.stdout : null;
+      },
+    },
+  ))();
+  return gitExe;
+}
+
 async function git($: Engine, cwd: string, args: readonly string[]): Promise<string | null> {
-  const ran = await $.process.run(["git", "-C", cwd, ...args], { timeoutMs: 20_000 }).catch(() => null);
+  const ran = await $.process.run([await gitProgram($), "-C", cwd, ...args], { timeoutMs: 20_000 }).catch(() => null);
   return ran && ran.exitCode === 0 ? ran.stdout : null;
 }
 

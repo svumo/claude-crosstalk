@@ -2,14 +2,38 @@
 // repository. Git is run by argument list, never through a shell.
 
 import { execFile } from "node:child_process";
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { basename, dirname } from "node:path";
+
+import { findGit } from "../context/git-exe.ts";
 
 export type GitResult = { code: number; stdout: string; stderr: string };
 
-export function git(cwd: string, args: readonly string[]): Promise<GitResult> {
+// Git for Windows on Windows, found once per process (see context/git-exe.ts).
+let gitExe: Promise<string> | null = null;
+
+export function gitProgram(): Promise<string> {
+  gitExe ??= findGit(
+    {
+      platform: process.platform,
+      path: process.env.PATH ?? process.env.Path ?? "",
+      programFiles: [process.env.ProgramFiles ?? "", process.env["ProgramFiles(x86)"] ?? "", process.env.ProgramW6432 ?? ""],
+      localAppData: process.env.LOCALAPPDATA ?? "",
+    },
+    {
+      exists: async (path) => existsSync(path),
+      version: (path) => new Promise((resolve) => {
+        execFile(path, ["--version"], { timeout: 10_000, windowsHide: true }, (error, stdout) => resolve(error ? null : String(stdout)));
+      }),
+    },
+  );
+  return gitExe;
+}
+
+export async function git(cwd: string, args: readonly string[]): Promise<GitResult> {
+  const program = await gitProgram();
   return new Promise((resolve) => {
-    execFile("git", ["-C", cwd, ...args], { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+    execFile(program, ["-C", cwd, ...args], { env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
       const code = error ? (typeof error.code === "number" ? error.code : 1) : 0;
       resolve({ code, stdout: String(stdout), stderr: String(stderr) });
     });
