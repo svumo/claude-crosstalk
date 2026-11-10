@@ -51,7 +51,7 @@ When Copilot wants to do something, a request shows in the transcript with exact
 
 Only you can answer. `/copilot approve` works when you type it; Claude cannot run it for you, and no tool the model can call writes an answer.
 
-**If Copilot ever runs a tool without asking**, Crosstalk ends it on the spot and the reply says `STOPPED FOR SAFETY`. Check the worktree before using anything from it.
+**If Copilot ever runs a tool without asking**, Crosstalk ends it on the spot and the reply says `STOPPED FOR SAFETY`, with the command that ran. Check the worktree before using anything from it. In `bypass` mode it's only logged, and the task carries on.
 
 ## The reply
 

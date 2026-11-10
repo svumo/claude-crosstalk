@@ -282,7 +282,7 @@ class TaskRun {
       this.set("working");
       let end = await runTurn(prompt, {
         backend, events: this.events, broker: this.broker, tripwire: this.tripwire, worktree: tree.path,
-        timeoutMs: this.options.config.turnTimeoutMs, shouldStop: () => existsSync(this.paths.stop), log: this.log,
+        timeoutMs: this.options.config.turnTimeoutMs, shouldStop: () => existsSync(this.paths.stop), log: this.log, mode: () => this.mode(),
       });
       // A backend that died before it did anything is started once more, with the same prompt.
       if (end.kind === "gone" && !end.ranTool && !hasRestarted) {
@@ -292,7 +292,7 @@ class TaskRun {
         if ((await start()) === "") {
           end = await runTurn(prompt, {
             backend, events: this.events, broker: this.broker, tripwire: this.tripwire, worktree: tree.path,
-            timeoutMs: this.options.config.turnTimeoutMs, shouldStop: () => existsSync(this.paths.stop), log: this.log,
+            timeoutMs: this.options.config.turnTimeoutMs, shouldStop: () => existsSync(this.paths.stop), log: this.log, mode: () => this.mode(),
           });
         }
       }

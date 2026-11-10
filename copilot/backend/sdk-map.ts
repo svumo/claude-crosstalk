@@ -54,6 +54,13 @@ function unaskedKind(data: Bag): ToolKind {
   return data.readOnly === true ? "read" : "other";
 }
 
+// The command line of a shell call no permission request named, so a stop or a log says what ran.
+// Copilot (seen on 1.0.108) runs some shell commands it judges safe without asking; the start
+// event still carries them: the tool's own `command` argument, else the SDK's display form.
+function unaskedCommand(data: Bag): string {
+  return text(bag(data.arguments).command) || text(bag(data.shellToolInfo).displayCommand);
+}
+
 // A tool announced or ending, as a tool event. `asked` holds the requests the person was put, by
 // tool call id, so the event carries the same kind, command and paths the request did.
 //
@@ -67,14 +74,16 @@ export function toolOf(type: string, data: unknown, asked: Map<string, Permissio
   const ask = asked.get(id);
   const before = known.get(id);
   const isStart = type === "tool.execution_start";
+  const command = ask?.command || before?.command || unaskedCommand(d);
+  const unaskedPaths = texts(bag(d.shellToolInfo).possiblePaths);
   const event: ToolEvent = {
     type: "tool",
     id,
     kind: ask?.kind ?? before?.kind ?? unaskedKind(d),
     title: text(d.toolTitle) || text(d.toolName) || (before?.title ?? ""),
     status: isStart ? "pending" : d.success === true ? "done" : "failed",
-    ...(ask?.command ? { command: ask.command } : before?.command ? { command: before.command } : {}),
-    paths: ask?.paths ?? before?.paths ?? [],
+    ...(command ? { command } : {}),
+    paths: ask?.paths ?? before?.paths ?? unaskedPaths,
     diffs: [],
   };
   known.set(id, event);

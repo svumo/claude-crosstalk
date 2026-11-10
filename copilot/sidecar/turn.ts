@@ -9,6 +9,7 @@ import type { Broker } from "./broker.ts";
 import { resolveReal } from "./files.ts";
 import type { EventLog, Log } from "./record.ts";
 import type { Tripwire } from "./tripwire.ts";
+import type { Mode } from "../protocol/schema.ts";
 
 export type TurnEnd =
   | { kind: "done"; result: TurnResult; said: string }
@@ -26,6 +27,9 @@ export type TurnDeps = {
   timeoutMs: number;
   shouldStop: () => boolean;
   log: Log;
+  // The task's permission mode now. In bypass a tool that ran without asking is written down, not
+  // a breach: the person already approved everything, so there was nothing to ask.
+  mode?: () => Mode;
 };
 
 const WATCH_MS = 250;
@@ -68,6 +72,11 @@ export async function runTurn(prompt: string, deps: TurnDeps): Promise<TurnEnd> 
       diffs: event.diffs.map((d) => ({ path: d.path, before: cut(d.before), after: cut(d.after) })),
     });
     const problem = tripwire.check(event, isOutside);
+    if (problem !== "" && deps.mode?.() === "bypass") {
+      log("warn", "unasked", { tool: event.id, kind: event.kind, command: event.command ?? null });
+      events.add("permission", `ran without asking (bypass): ${event.command ?? event.title}`, { id: event.id });
+      return;
+    }
     if (problem !== "" && breach === "") {
       breach = problem;
       log("error", "tripwire", { tool: event.id, kind: event.kind });

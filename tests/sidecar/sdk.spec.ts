@@ -10,7 +10,9 @@ import { test } from "node:test";
 import { BackendGone } from "../../copilot/backend/adapter.ts";
 import type { BackendEvent, PermissionAnswer, PermissionAsk } from "../../copilot/backend/adapter.ts";
 import { SdkBackend } from "../../copilot/backend/sdk.ts";
-import { askOf } from "../../copilot/backend/sdk-map.ts";
+import { askOf, toolOf } from "../../copilot/backend/sdk-map.ts";
+import type { Mode } from "../../copilot/protocol/schema.ts";
+import { runTurn } from "../../copilot/sidecar/turn.ts";
 import { chooseBackend } from "../../copilot/sidecar/settings.ts";
 import { installArgs, npmCommand } from "../../copilot/sidecar/setup.ts";
 import { Tripwire } from "../../copilot/sidecar/tripwire.ts";
@@ -84,6 +86,56 @@ test("a tool that finishes without asking trips the tripwire", async () => {
   const wire = new Tripwire();
   const problems = events.map((e) => wire.check(e, false)).filter((p) => p !== "");
   assert.equal(problems.length, 1);
+});
+
+test("a shell call Copilot ran without asking still carries its command and paths", () => {
+  const known = new Map();
+  const start = toolOf("tool.execution_start", { toolCallId: "c1", toolName: "powershell", arguments: { command: "git status" }, shellToolInfo: { possiblePaths: ["a.txt"], hasWriteFileRedirection: false } }, new Map(), known);
+  assert.equal(start.kind, "shell");
+  assert.equal(start.command, "git status");
+  assert.deepEqual(start.paths, ["a.txt"]);
+  const done = toolOf("tool.execution_complete", { toolCallId: "c1", success: true }, new Map(), known);
+  assert.equal(done.command, "git status");
+  assert.match(new Tripwire().check(done, false), /ran a shell tool with no approval: git status/);
+  const shown = toolOf("tool.execution_start", { toolCallId: "c2", toolName: "bash", shellToolInfo: { displayCommand: "ls", possiblePaths: [] } }, new Map(), new Map());
+  assert.equal(shown.command, "ls");
+});
+
+// A turn against a backend that runs one shell command without asking, in the given mode.
+async function unaskedTurn(mode: Mode) {
+  const added: string[] = [];
+  let stopped = false;
+  const backend = {
+    prompt: async (_p: string, h: { onEvent: (e: BackendEvent) => void }) => {
+      h.onEvent({ type: "tool", id: "c1", kind: "shell", title: "Running command", status: "done", command: "git status", paths: [], diffs: [] });
+      return { stop: "end_turn", usage: { inputTokens: 0, outputTokens: 0, cachedTokens: 0 } };
+    },
+    cancel: async () => {},
+    stop: async () => { stopped = true; },
+  };
+  const end = await runTurn("go", {
+    backend: backend as never,
+    events: { add: (type: string, text?: string) => void added.push(`${type}: ${text ?? ""}`), text: () => {}, flush: () => {} } as never,
+    broker: { close: () => {}, decide: async () => "allow" } as never,
+    tripwire: new Tripwire(), worktree: folder(), timeoutMs: 60_000, shouldStop: () => false, log: () => {}, mode: () => mode,
+  });
+  return { end, added, stopped };
+}
+
+test("in bypass a tool that ran without asking is written down and the turn goes on", async () => {
+  const { end, added, stopped } = await unaskedTurn("bypass");
+  assert.equal(end.kind, "done");
+  assert.equal(stopped, false);
+  assert.ok(added.includes("permission: ran without asking (bypass): git status"));
+});
+
+test("in ask and auto a tool that ran without asking still stops the task, naming the command", async () => {
+  for (const mode of ["ask", "auto"] as const) {
+    const { end, stopped } = await unaskedTurn(mode);
+    assert.equal(end.kind, "breach");
+    assert.equal(stopped, true);
+    assert.match(end.kind === "breach" ? end.detail : "", /git status/);
+  }
 });
 
 test("cancel ends the turn as cancelled", async () => {
