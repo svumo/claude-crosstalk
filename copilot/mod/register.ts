@@ -541,6 +541,7 @@ async function setModel($: Engine, root: string, model: string, origin: Origin):
     return `Copilot has no model ${model}. /crosstalk-gh models lists them.`;
   }
   await writeConfig($, root, { model: model === "default" ? "" : model });
+  void tick($).catch(() => {}); // the meter names the new model now, not at the next tick
   return model === "default" ? "New Copilot tasks use Copilot's own default model." : `New Copilot tasks use ${model}.`;
 }
 

@@ -391,3 +391,23 @@ test('the copilot ring names the model new tasks use, from config.json', async (
   expect(await terminal.find({ type: 'Text', text: ' 11% gh · gpt-5 · reset 1 Dec' })).toBeDefined()
   await terminal.unmount()
 })
+
+test('the copilot ring names a running task\'s own model, and a new default at once', async ($, on) => {
+  const { files } = computer(on)
+  files.gh = QUOTA_ANSWER
+  files.set(`${BOX}/copilot/config.json`, JSON.stringify({ model: 'gpt-5' }))
+  on('ui.render', () => skinsBand())
+  await $.session.start(START)
+  putState(files, stateOf({ state: 'working', pending: [], model: 'claude-sonnet-5-5' }))
+  expect(await say($, 'model gpt-5-mini')).toBe('New Copilot tasks use gpt-5-mini.')
+  await settle()
+  const running = await mountBand($, 'terminal')
+  expect(await running.find({ type: 'Text', text: ' 11% gh · claude-sonnet-5-5 · reset 1 Dec' })).toBeDefined()
+  await running.unmount()
+  putState(files, stateOf({ state: 'completed', pending: [], model: 'claude-sonnet-5-5' }))
+  expect(await say($, 'model gpt-5-mini')).toBe('New Copilot tasks use gpt-5-mini.')
+  await settle()
+  const idle = await mountBand($, 'terminal')
+  expect(await idle.find({ type: 'Text', text: ' 11% gh · gpt-5-mini · reset 1 Dec' })).toBeDefined()
+  await idle.unmount()
+})
