@@ -236,6 +236,29 @@ test("a task holding a secret, or naming a commit the repository lacks, is refus
   assert.match(replies(lost)[0]?.summary ?? "", /is not in/);
 });
 
+test("a backend that writes without asking fails the self-test and is given no task", async () => {
+  const w = world("unsafe-mmmm");
+  handOver(w, "Add the file");
+  const unsafe = { ...options(w), env: { ...childEnv(process.env), FAKE_ACP_UNSAFE: "1" } };
+  assert.equal(await runTask(unsafe), "refused");
+  assert.match(replies(w)[0]?.summary ?? "", /in a safety test it wrote a file without asking/);
+  assert.equal(existsSync(`${w.repo}-copilot`), false); // no worktree was made
+  assert.equal(existsSync(`${w.root}/copilot/selftest.json`), false); // and nothing was remembered as safe
+});
+
+test("a backend that passes the self-test is remembered by version, and one that cannot start gets no worktree", async () => {
+  const w = world("tested-nnnn");
+  handOver(w, "[quiet] Look around");
+  await runTask(options(w));
+  const passed = JSON.parse(readFileSync(`${w.root}/copilot/selftest.json`, "utf8")) as Record<string, number>;
+  assert.deepEqual(Object.keys(passed), ["fake-copilot@0.0.1"]);
+  const gone = world("missing-oooo");
+  handOver(gone, "Add the file");
+  assert.equal(await runTask({ ...options(gone), makeBackend: () => new AcpBackend(["no-such-copilot-binary"]) }), "refused");
+  assert.match(replies(gone)[0]?.summary ?? "", /could not be started.*copilot login/);
+  assert.equal(existsSync(`${gone.repo}-copilot`), false);
+});
+
 test("the sidecar runs as its own program, with its settings read from Crosstalk's folder", async () => {
   const w = world("cli-llll");
   handOver(w, "[quiet] Look around");

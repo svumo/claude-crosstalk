@@ -90,7 +90,8 @@ async function turn(prompt: string): Promise<Bag> {
   } else if (prompt.includes("[no-permission]")) {
     await write(join(cwd, "unapproved.txt"), false);
   } else {
-    await write(join(cwd, "copilot-was-here.txt"), true);
+    // FAKE_ACP_UNSAFE makes every write skip the request, as a backend whose approvals are broken.
+    await write(join(cwd, "copilot-was-here.txt"), process.env.FAKE_ACP_UNSAFE !== "1");
   }
   return { stopReason: isCancelled ? "cancelled" : "end_turn", usage };
 }

@@ -18,6 +18,7 @@ import { addTurn, DEFAULT_CAPS, spent } from "./budget.ts";
 import { privateDir, readJson, writeJson } from "./files.ts";
 import { Peer } from "./peer.ts";
 import { EventLog, makeAudit, makeLog } from "./record.ts";
+import { selfTest } from "./selftest.ts";
 import type { Log } from "./record.ts";
 import { Tripwire } from "./tripwire.ts";
 import { runTurn } from "./turn.ts";
@@ -156,6 +157,17 @@ class TaskRun {
     }
     const context = checked.context;
     this.audit("task", { from: task.from, task: task.body.task, base: context.git.head_sha, model });
+
+    // No version of the backend gets a task before it has shown that it asks first.
+    const tested = await selfTest(this.options.makeBackend(model), this.options.env, `${this.options.root}/copilot/selftest.json`);
+    this.log(tested.verdict === "passed" ? "info" : "warn", "selftest", { verdict: tested.verdict });
+    if (tested.verdict === "unstartable") {
+      return this.refuse(task, `Copilot could not be started (${tested.detail}). Is it installed and signed in (copilot login)?`);
+    }
+    if (tested.verdict === "failed") {
+      this.audit("breach", { detail: `self-test: ${tested.detail}` });
+      return this.refuse(task, `Copilot was not given the task: in a safety test ${tested.detail}. This version of Copilot is not asking before it acts; update it, then try again.`);
+    }
 
     let tree: Worktree;
     try {

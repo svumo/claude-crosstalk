@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
+import { tooOld } from '../copilot/backend/acp-map.ts'
 import type { BackendEvent, PermissionAsk } from '../copilot/backend/adapter.ts'
 import { isDirty, isInside, parseStatus, parseWorktrees } from '../copilot/context/git.ts'
 import { checkContext, contextNote, secretsIn } from '../copilot/context/minimise.ts'
@@ -171,6 +172,18 @@ test('a turn is priced in AI credits when the model has a rate, and the caps sto
   expect(spent({ ...emptyUsage(), prompts: 5 }, DEFAULT_CAPS)).toContain('5 prompts')
   expect(spent(emptyUsage(), { ...DEFAULT_CAPS, hops: 25 })).toContain('25 replies in a row')
   expect(spent(emptyUsage(), DEFAULT_CAPS)).toBe('')
+})
+
+test('a Copilot CLI from before its permission requests were fixed is refused', async () => {
+  expect(tooOld('Copilot', '1.0.104')).toContain('too old')
+  expect(tooOld('Copilot', '1.0.81-2')).toContain('too old')
+  expect(tooOld('Copilot', '0.9.200')).toContain('too old')
+  expect(tooOld('Copilot', '1.0.105')).toBe('')
+  expect(tooOld('copilot', '1.1.0')).toBe('')
+  expect(tooOld('Copilot', '2.0.0')).toBe('')
+  // another agent's numbers are its own, and an unreadable version is left to the self-test
+  expect(tooOld('fake-copilot', '0.0.1')).toBe('')
+  expect(tooOld('Copilot', '')).toBe('')
 })
 
 test('task files have fixed places, and events sort by name', async () => {

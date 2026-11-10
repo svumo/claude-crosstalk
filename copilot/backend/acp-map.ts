@@ -126,6 +126,23 @@ export function usageOf(result: Bag): TokenUsage {
   };
 }
 
+// Copilot CLI's permission requests went missing from 1.0.81 and came back in 1.0.105
+// (github/copilot-cli issue 4537), so nothing older than that is driven over ACP.
+export const COPILOT_FLOOR = [1, 0, 105] as const;
+
+// Why this agent is too old to use, or "" when it is not. Only Copilot itself is held to the
+// floor: another ACP agent's version numbers mean something else.
+export function tooOld(name: string, version: string): string {
+  const parts = /^(\d+)\.(\d+)\.(\d+)/.exec(version.trim());
+  if (name.trim().toLowerCase() !== "copilot" || !parts) {
+    return "";
+  }
+  const have = [Number(parts[1]), Number(parts[2]), Number(parts[3])];
+  const at = have.findIndex((n, i) => n !== COPILOT_FLOOR[i]);
+  const isOlder = at >= 0 && (have[at] ?? 0) < (COPILOT_FLOOR[at] ?? 0);
+  return isOlder ? `Copilot CLI ${version.trim()} is too old: versions before ${COPILOT_FLOOR.join(".")} can run tools without asking. Update it (copilot update, or npm install -g @github/copilot)` : "";
+}
+
 const STOPS: Record<string, TurnResult["stop"]> = { end_turn: "end_turn", cancelled: "cancelled", max_tokens: "max_tokens", refusal: "refusal" };
 
 export function turnOf(result: unknown): TurnResult {

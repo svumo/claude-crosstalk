@@ -7,7 +7,7 @@
 import { spawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
 
-import { askOf, eventOf, outcomeFor, turnOf } from "./acp-map.ts";
+import { askOf, eventOf, outcomeFor, tooOld, turnOf } from "./acp-map.ts";
 import type { ToolEvent } from "./acp-map.ts";
 import { BackendGone } from "./adapter.ts";
 import type { BackendInfo, CopilotBackend, StartOptions, TurnHandlers, TurnResult } from "./adapter.ts";
@@ -64,13 +64,18 @@ export class AcpBackend implements CopilotBackend {
       await this.stop();
       throw new Error(`the backend speaks ACP version ${JSON.stringify(hello.protocolVersion)}, and this adapter speaks ${PROTOCOL_VERSION}`);
     }
+    const agent = bag(hello.agentInfo);
+    const old = tooOld(String(agent.name ?? ""), String(agent.version ?? ""));
+    if (old !== "") {
+      await this.stop();
+      throw new Error(old);
+    }
     const session = bag(await this.call("session/new", { cwd: options.cwd, mcpServers: [] }));
     this.sessionId = String(session.sessionId ?? "");
     if (this.sessionId === "") {
       await this.stop();
       throw new Error("the backend opened no session");
     }
-    const agent = bag(hello.agentInfo);
     return { name: String(agent.name ?? "acp"), version: String(agent.version ?? "") };
   }
 
