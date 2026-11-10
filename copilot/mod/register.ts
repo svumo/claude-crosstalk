@@ -88,7 +88,10 @@ function noteEdit(path: unknown): void {
 export function registerCopilot(on: On): void {
   on("command.run", { command: COMMAND }, async ($, e) => ({ text: await copilotCommand($, String(e.args ?? ""), e.origin) }));
 
-  on("tool.call", { tool: GH_TOOL }, async ($, e) => ({ result: await copilotCommand($, String(e.args ?? ""), CLAUDE_TOOL) }));
+  on("tool.call", { tool: GH_TOOL }, async ($, e) => {
+    const images = Array.isArray(e.images) ? e.images.map(String).filter((p) => p !== "") : [];
+    return { result: await copilotCommand($, String(e.args ?? ""), CLAUDE_TOOL, images.length > 0 ? images : undefined) };
+  });
 
   on("tool.call", { tool: "Edit" }, async (_$, e, next) => {
     noteEdit(e.file_path);
@@ -170,7 +173,14 @@ export async function startCopilot($: Engine, given: Host): Promise<void> {
   await $.tool.register({
     name: "crosstalk_gh",
     description: "Run a /crosstalk-gh command, which drives GitHub Copilot CLI. `args` is everything after /crosstalk-gh: a task to hand Copilot (it runs in its own git worktree and branch cut from this session's branch, and the result comes back as a Crosstalk message), optionally led by --bypass, --auto, --mode <mode> or --model <id>; or one of: status, stop [task], mode <ask|auto|bypass> [task], models, model <id|default>, approve|allow|deny <request> [task], setup, help.",
-    inputSchema: { type: "object", properties: { args: { type: "string", description: "Everything after /crosstalk-gh, e.g. \"status\" or \"--bypass fix the login bug\"" } }, required: ["args"] },
+    inputSchema: {
+      type: "object",
+      properties: {
+        args: { type: "string", description: "Everything after /crosstalk-gh, e.g. \"status\" or \"--bypass fix the login bug\"" },
+        images: { type: "array", items: { type: "string" }, description: "With a task: absolute paths of up to 10 png, jpg, gif or webp pictures for Copilot. They are put in its worktree and Copilot is told to open them." },
+      },
+      required: ["args"],
+    },
     isDeferred: false,
   });
   quota = null;
@@ -215,7 +225,7 @@ async function nodeFault($: Engine): Promise<string> {
   return isEnough ? "" : `${need}; this computer has ${ran.stdout.trim()}.`;
 }
 
-async function handOver($: Engine, root: string, me: Who & { address: string }, task: string, picked: { mode?: Mode; model?: string } = {}): Promise<string> {
+async function handOver($: Engine, root: string, me: Who & { address: string }, task: string, picked: { mode?: Mode; model?: string } = {}, files?: string[]): Promise<string> {
   const secrets = secretsIn(task);
   if (secrets.length > 0) {
     return `Not sent: the task holds what looks like ${secrets.join(" and ")}. Take it out and try again.`;
@@ -243,9 +253,21 @@ async function handOver($: Engine, root: string, me: Who & { address: string }, 
     const started = await $.process.run(["node", `${$.plugin.root}/copilot/sidecar/main.ts`, "start", id, "--root", root], { timeoutMs: 30_000 }).catch(() => null);
     return started && started.exitCode === 0 ? "" : `Couldn't start Copilot task ${id}${started?.stderr ? `: ${started.stderr.trim().slice(0, 300)}` : "."}`;
   };
-  // Pictures pasted with the command reach prompt.submit, which runs after this command has
-  // answered; so the start waits for it (copilotSubmit), or for the timer when it never comes.
-  holdLaunch($, launch, paths.attachments);
+  if (files) {
+    // Claude's tool names its pictures as files, so the task starts now with them.
+    const saved = await copyPictures($, paths.attachments, files);
+    if (saved.error) {
+      return saved.error;
+    }
+    const failed = await launch(saved.names);
+    if (failed !== "") {
+      return failed;
+    }
+  } else {
+    // Pictures pasted with the command reach prompt.submit, which runs after this command has
+    // answered; so the start waits for it (copilotSubmit), or for the timer when it never comes.
+    holdLaunch($, launch, paths.attachments);
+  }
   const dirty = context.git.dirty.staged + context.git.dirty.unstaged + context.git.dirty.untracked;
   const config = await readConfig($, root);
   const mode = picked.mode ?? (isMode(config.mode) ? config.mode : "ask");
@@ -292,6 +314,38 @@ function holdLaunch($: Engine, launch: Held["launch"], dir: string): void {
       release($, task, []);
     }
   });
+}
+
+// Node writes a picture file as base64, so no image bytes pass through the engine's text calls.
+const TO_BASE64 = "const fs=require('fs'),path=require('path');const [src,out]=process.argv.slice(1);fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,fs.readFileSync(src).toString('base64'))";
+
+// Copies picture files named by Claude's tool into the task's attachments folder, as savePictures
+// does for pasted ones. Returns the names saved (`1.png`), or why one could not be used.
+async function copyPictures($: Engine, dir: string, files: string[]): Promise<{ names: string[]; error?: string }> {
+  if (files.length > IMAGES_MAX) {
+    return { names: [], error: `Not sent: ${files.length} pictures; the most is ${IMAGES_MAX}.` };
+  }
+  const names: string[] = [];
+  for (const file of files) {
+    const ext = /\.(png|jpe?g|gif|webp)$/i.exec(file)?.[1]?.toLowerCase().replace("jpeg", "jpg");
+    if (!ext) {
+      return { names: [], error: `Not sent: ${file} is not a png, jpg, gif or webp picture.` };
+    }
+    const info = await $.fs.stat(file).catch(() => null);
+    if (!info || info.kind !== "file") {
+      return { names: [], error: `Not sent: there is no picture at ${file}.` };
+    }
+    if (info.size > IMAGE_BYTES_MAX) {
+      return { names: [], error: `Not sent: ${file} is over ${IMAGE_BYTES_MAX / 1024 / 1024} MB.` };
+    }
+    const name = `${names.length + 1}.${ext}`;
+    const ran = await $.process.run(["node", "-e", TO_BASE64, file, `${dir}/${name}.b64`], { timeoutMs: 30_000 }).catch(() => null);
+    if (!ran || ran.exitCode !== 0) {
+      return { names: [], error: `Not sent: ${file} could not be read.` };
+    }
+    names.push(name);
+  }
+  return { names };
 }
 
 // Saves each pasted picture as base64 in the task's attachments folder; the sidecar decodes it
@@ -483,7 +537,7 @@ async function setModel($: Engine, root: string, model: string, origin: Origin):
   return model === "default" ? "New Copilot tasks use Copilot's own default model." : `New Copilot tasks use ${model}.`;
 }
 
-async function copilotCommand($: Engine, args: string, origin: Origin): Promise<string> {
+async function copilotCommand($: Engine, args: string, origin: Origin, images?: string[]): Promise<string> {
   const me = host?.who() ?? null;
   if (!host || !me) {
     return "Crosstalk did not start in this session.";
@@ -523,6 +577,6 @@ async function copilotCommand($: Engine, args: string, origin: Origin): Promise<
       if ((command.mode || command.model) && !mayControl(origin)) {
         return "Only you can pick a Copilot task's mode or model: type the command yourself.";
       }
-      return handOver($, host.root, me, command.task, { ...(command.mode ? { mode: command.mode } : {}), ...(command.model ? { model: command.model } : {}) });
+      return handOver($, host.root, me, command.task, { ...(command.mode ? { mode: command.mode } : {}), ...(command.model ? { model: command.model } : {}) }, images);
   }
 }

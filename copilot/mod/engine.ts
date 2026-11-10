@@ -56,7 +56,7 @@ type Hook<E, R> = ($: Engine, e: E, next: (e: E) => Promise<R>) => Promise<R> | 
 // `on` as these hooks call it: an event, a matcher, and the hook.
 export type On = {
   (event: "command.run", matcher: { command: string }, hook: Hook<CommandInput, CommandAnswer>): unknown;
-  (event: "tool.call", matcher: { tool: string }, hook: Hook<{ file_path?: string; notebook_path?: string; args?: string }, unknown>): unknown;
+  (event: "tool.call", matcher: { tool: string }, hook: Hook<{ file_path?: string; notebook_path?: string; args?: string; images?: unknown[] }, unknown>): unknown;
   (event: "ui.render", matcher: { component: string }, hook: Hook<RenderInput, unknown>): unknown;
 };
 

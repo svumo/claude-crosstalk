@@ -243,6 +243,24 @@ test('Claude runs any /crosstalk-gh command through the crosstalk_gh tool, appro
   expect(JSON.parse(files.get(`${BOX}/copilot/config.json`)).mode).toBe('bypass')
 })
 
+test('a task from the crosstalk_gh tool starts at once with the pictures it names, and a bad one is refused', async ($, on) => {
+  const { files, calls } = computer(on)
+  await $.session.start(START)
+  files.set('C:/shots/meter.png', 'png bytes')
+  const gh = async (args: string, images: string[]) => JSON.stringify(await $.tool.call({ tool: 'mcp__crosstalk__crosstalk_gh', args, images } as never))
+  expect(await gh('Fix the meter', ['C:/shots/missing.png'])).toMatch(/Not sent: there is no picture at C:\/shots\/missing\.png/)
+  expect(await gh('Fix the meter', ['C:/shots/notes.txt'])).toMatch(/is not a png, jpg, gif or webp picture/)
+  expect(await gh('Fix the meter', ['C:/shots/meter.png'])).toMatch(/Copilot task fix-the-meter-\w+ started/)
+  const copies = calls.filter((c) => c[0] === 'node' && c[1] === '-e' && String(c[2]).includes('base64'))
+  expect(copies.length).toBe(1)
+  expect(copies[0][3]).toBe('C:/shots/meter.png')
+  expect(slash(copies[0][4])).toMatch(/\/copilot\/tasks\/fix-the-meter-\w+\/attachments\/1\.png\.b64$/)
+  const handoff = [...files.keys()].find((k: string) => /\/copilot\/tasks\/fix-the-meter-\w+\/task\.json$/.test(k))!
+  expect(JSON.parse(files.get(handoff)).body.images).toEqual(['1.png'])
+  // no wait for a pasted picture: the sidecar started without wake()
+  expect(calls.some((c) => c[0] === 'node' && String(c[1]).endsWith('/copilot/sidecar/main.ts') && c[2] === 'start')).toBe(true)
+})
+
 test('stop asks a running task to stop, and says so of one that has ended', async ($, on) => {
   const { files } = computer(on)
   await $.session.start(START)
