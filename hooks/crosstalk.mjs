@@ -22,6 +22,7 @@ import {
   choiceLabel, chosenProfile, COMPACT_INSTRUCTIONS, flagApplies, flagEnds, handoffName, handoffText, isOver, isPaused, LARGE_CONTEXT, LARGE_STOP,
   moveChoices, NOT_NOW, parsePercent, pausedNote, resumePrompt, stopLine, stopPoint, stopReason, summaryOf, USAGE_STOP, usagePhrase, windowKey, windowName, worstWindow,
   chooseOpenProfile, hostWindow, parseParents, PARENTS_SCRIPT, windowNote, profileWord,
+  hasConversation, transcriptDigest,
 } from "./core.mjs";
 import {
   configDirsInShell, homeCandidates, isInstalled, isSafeFolder, isSafeName, isUnreadable, looksLikeProfile,
@@ -732,7 +733,10 @@ async function resolveOpening($, pc, setup, override = "") {
   const helper = checked ? await hasHelper($, pc, editor) : false;
   const choice = chooseOpenIn(fromEnv, setup.openIn, termProgram, helper, editor.label, inApp);
   const inEditor = String(termProgram ?? "").toLowerCase() === "vscode";
-  return { fromEnv, editor, helper, checked, choice, inEditor, inApp, isWindows: pc.isWindows };
+  // In Windows Terminal, a "window" opening is a new tab of the window the person is in, unless
+  // they asked for a window of its own.
+  const inWt = pc.isWindows && !inEditor && !inApp && wanted !== "window" && Boolean(await $.env.get("WT_SESSION"));
+  return { fromEnv, editor, helper, checked, choice, inEditor, inApp, inWt, isWindows: pc.isWindows };
 }
 
 // One line that says what `open` will do from here, and how to change it.
@@ -926,7 +930,9 @@ async function openSession($, given, message, opts = {}) {
     place = `a new ${editor.label} terminal`;
     ran = await runCode($, pc, editor, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: openFolder ?? me.cwd, cmd: command }, editor.scheme)]);
   } else {
-    const opener = pc.isWindows ? { argv: windowArgv(openFolder ?? me.cwd, command) } : await unixWindow($, command);
+    const opener = pc.isWindows
+      ? { argv: windowArgv(openFolder ?? me.cwd, command, resolved.inWt), place: resolved.inWt ? "a new tab of this Windows Terminal window" : undefined }
+      : await unixWindow($, command);
     if (opener.error) {
       return { error: opener.error };
     }
@@ -1575,20 +1581,33 @@ async function stopForUsage($, stop) {
     } else if (stop.profile) {
       await $.clock.sleep(MOVE_DELAY_MS);
     }
+    // Build choice: a model-written summary costs a request on the account that is nearly spent,
+    // and often fails there. The handoff is cut from the transcript here instead, for free. The
+    // summary is made only when setup.json has usageCompact: true, or the transcript can't be read.
+    const setup = await readJson($, `${root}/setup.json`, {});
+    const transcriptText = titling?.transcript ? await readText($, titling.transcript) : null;
+    const isEmpty = transcriptText !== null && !hasConversation(transcriptText);
+    const digest = transcriptText && !isEmpty ? transcriptDigest(transcriptText) : "";
     let summary = "";
-    try {
-      summary = summaryOf(await $.session.compact({ instructions: COMPACT_INSTRUCTIONS }));
-    } catch {
-      // the handoff still points at the transcript
+    if (!isEmpty && (setup.usageCompact === true || !digest)) {
+      try {
+        summary = summaryOf(await $.session.compact({ instructions: COMPACT_INSTRUCTIONS }));
+      } catch {
+        // the handoff still points at the transcript
+      }
     }
     const now = await $.clock.now();
     const path = `${root}/handoffs/${handoffName(now, me.address)}`;
-    await $.fs.write(path, handoffText({ me, stop, summary, transcript: titling?.transcript ?? "", now }));
+    if (!isEmpty) {
+      await $.fs.write(path, handoffText({ me, stop, summary, digest, transcript: titling?.transcript ?? "", now }));
+    }
     // Build choice: the new session works alone when the origin stopped near its limit, as the
     // origin is paused and a report back could go unanswered or spend what it has left.
     const alone = Boolean(stop.window) || isOver(usage.window, currentPoint().percent);
     const what = stop.window ? `${me.profile} is at ${stopReason(stop)}. This session is stopped and` : `Moving to ${stop.profile}: this session is`;
-    $.ui.log(`Crosstalk: ${what} ${summary ? "compacted" : "not compacted (the summary couldn't be made)"}. Handoff: ${path}${summary ? `\n\n${summary}` : ""}`);
+    $.ui.log(isEmpty
+      ? `Crosstalk: ${what} empty: nothing was typed here, so there is nothing to hand over.`
+      : `Crosstalk: ${what} ${summary ? "compacted" : digest ? "cut down from its transcript" : "not compacted (the summary couldn't be made)"}. Handoff: ${path}${summary ? `\n\n${summary}` : ""}`);
     if (stop.window) {
       void $.ui.notify(`${me.title || me.address} stopped at ${stopReason(stop)}. Move it to another account?`, { title: "Crosstalk" }).catch(() => {});
     }
@@ -1596,7 +1615,7 @@ async function stopForUsage($, stop) {
     if (!profile) {
       return;
     }
-    const opened = await openSession($, profile, resumePrompt(path, me, alone));
+    const opened = await openSession($, profile, isEmpty ? "" : resumePrompt(path, me, alone));
     $.ui.log(`Crosstalk: ${opened.error ?? opened.text}`);
   } finally {
     usage.isStopping = false;
@@ -1611,9 +1630,13 @@ async function askMove($, stop, now) {
     $.ui.log(`Crosstalk: no other profile is known to move to. ${later} /crosstalk launch <profile> <command> adds one.`);
     return "";
   }
+  // One yes/no: the lowest-usage profile or Not now. Another profile can still be typed under
+  // "Other", and the question names the rest.
+  const [best, ...rest] = choices;
+  const others = rest.length ? ` (or type ${rest.map((c) => c.profile).join(" / ")})` : "";
   let answer = "";
   try {
-    answer = await $.ui.ask(`${me.profile} is at ${stopReason(stop)}. Move this session to another account?`, [...choices.map(choiceLabel), NOT_NOW]);
+    answer = await $.ui.ask(`${me.profile} is at ${stopReason(stop)}. Move this session to ${best.profile}${others}?`, [choiceLabel(best), NOT_NOW]);
   } catch {
     $.ui.log(`Crosstalk: not moved. ${later}`);
     return "";

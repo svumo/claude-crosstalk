@@ -7,7 +7,7 @@ import {
   linuxArgv, linuxCandidates, macArgv, parseOpenArgs, shQuote, userShell, whichArgv,
   appDataFolders, appPanelCommand, appTitle, cleanTitle, labelOf, listLine, projectFolderName, transcriptTitle,
   chosenProfile, choiceLabel, flagApplies, flagEnds, FLAG_MS, handoffName, isPaused, moveChoices, NOT_NOW, parsePercent, pausedNote,
-  resumePrompt, stopPoint, summaryOf, usagePhrase, worstWindow,
+  resumePrompt, stopPoint, summaryOf, usagePhrase, worstWindow, hasConversation, transcriptDigest,
   appWindowOf, chooseOpenProfile, hostWindow, parseParents, windowNote, profileWord,
 } from '../hooks/core.mjs'
 import {
@@ -551,6 +551,7 @@ test('the VS Code link carries any folder whole', async () => {
   const d = link.split('d=')[1]
   expect(unlink(d)).toEqual({ name: 'claude zai', cwd, cmd: 'claude zai' })
   expect(windowArgv(cwd, 'claude zai')).toEqual(['wt', '-w', 'new', '-d', cwd, 'pwsh', '-NoExit', '-Command', 'claude zai'])
+  expect(windowArgv(cwd, 'claude zai', true)).toEqual(['wt', '-w', '0', 'new-tab', '-d', cwd, 'pwsh', '-NoExit', '-Command', 'claude zai'])
 })
 
 test('the session that opened is the new one of that profile in this folder', async () => {
@@ -1011,9 +1012,9 @@ const until = async (check: () => boolean) => {
 const measure = ($: any, percentUsed: number, contextPercent = 30) =>
   $.session.measure({ context: { window: 200_000, percent: contextPercent }, rateLimits: [{ kind: 'five_hour', percentUsed, resetsAt: RESET }], changed: ['rateLimits'] })
 
-function guardWorld(on: any, answer = 'mikey (12%)') {
+function guardWorld(on: any, answer = 'mikey (12%)', extraEnv: Record<string, string> = {}) {
   const ran: any[] = []
-  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work' }, (e: any) => { ran.push(e.argv); return RAN_OK })
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', ...extraEnv }, (e: any) => { ran.push(e.argv); return RAN_OK })
   const w: any = { files, ran, aborted: [] as string[], compacted: [] as any[], asked: [] as any[] }
   on('clock.sleep', () => ({ value: undefined }))
   on('session.measure', (_: any, e: any) => ({ changed: e.changed }))
@@ -1053,12 +1054,73 @@ test('at 93% a session flags its account, stops its turn, compacts, writes a han
   expect(handoff).toMatch(/93% of its 5-hour limit/)
   expect(handoff).toMatch(/SUMMARY: fix the login/)
   expect(handoff).toMatch(/projects\/C--code-proj\/self-1\.jsonl/)
-  expect(JSON.stringify(w.asked[0])).toMatch(/work is at 93% of its 5-hour limit\. Move this session to another account\?/)
+  expect(JSON.stringify(w.asked[0])).toMatch(/work is at 93% of its 5-hour limit\. Move this session to mikey\?/)
   expect(JSON.stringify(w.asked[0])).toMatch(/mikey \(12%\).*Not now/)
   expect(w.ran.some((argv: string[]) => argv.join(' ').includes('claude mikey'))).toBe(true)
   expect(w.resume()).toMatch(/You own this work alone: don't message work\/proj-self/)
   expect(w.files.logs.some((l: string) => /stopped and compacted\. Handoff: [^\n]*\n\nSUMMARY/.test(l))).toBe(true)
   expect(isPaused(JSON.parse(w.files.get(`${BOX}/sessions/self-1.json`)))).toBe(true)
+})
+
+const line =(o: any) => JSON.stringify(o)
+const talk = [
+  line({ type: 'mode', mode: 'normal' }),
+  line({ type: 'user', message: { role: 'user', content: 'fix the login redirect' } }),
+  line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Looking at auth.ts' }, { type: 'tool_use', name: 'Read' }] } }),
+  line({ type: 'user', message: { content: [{ type: 'tool_result', content: 'ignored' }] } }),
+  line({ type: 'user', message: { content: '<system-reminder>ignored</system-reminder>' } }),
+  line({ type: 'user', message: { content: [{ type: 'text', text: 'now add a test' }] } }),
+  line({ type: 'assistant', message: { content: [{ type: 'text', text: 'Added login.test.ts; one still fails' }] } }),
+].join('\n')
+
+test('a digest of a transcript is built without a model: first request, latest ones, last reply', async () => {
+  expect(hasConversation(talk)).toBe(true)
+  expect(hasConversation(line({ type: 'system', content: 'notice' }) + '\n' + line({ type: 'mode' }))).toBe(false)
+  expect(hasConversation('')).toBe(false)
+  const digest = transcriptDigest(talk)
+  expect(digest).toMatch(/First request:\nfix the login redirect/)
+  expect(digest).toMatch(/Latest requests, oldest first:\n- now add a test/)
+  expect(digest).toMatch(/Last assistant message:\nAdded login\.test\.ts; one still fails/)
+  expect(digest).not.toMatch(/ignored|Looking at auth/)
+  expect(transcriptDigest('')).toBe('')
+})
+
+test('with a readable transcript the handoff is cut from it: no compaction, one offer, a tab in Windows Terminal', async ($, on) => {
+  const w = guardWorld(on, 'mikey (12%)', { WT_SESSION: 'abc' })
+  w.files.set(TRANSCRIPT, talk)
+  await $.session.start(START)
+  w.openedNew()
+  await measure($, 94)
+  expect(await until(() => w.resume() !== '')).toBe(true)
+  expect(w.compacted.length).toBe(0)
+  const handoff = w.files.get(w.handoff())
+  expect(handoff).toMatch(/fix the login redirect/)
+  expect(handoff).toMatch(/Added login\.test\.ts; one still fails/)
+  expect(w.asked.length).toBe(1)
+  expect(w.asked[0].questions[0].options.length).toBe(2) // mikey, Not now
+  const opened = w.ran.find((argv: string[]) => argv.join(' ').includes('claude mikey'))
+  expect(opened.slice(0, 4)).toEqual(['wt', '-w', '0', 'new-tab'])
+})
+
+test('usageCompact brings the model summary back', async ($, on) => {
+  const w = guardWorld(on, NOT_NOW)
+  w.files.set(TRANSCRIPT, talk)
+  w.files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey' }, usageCompact: true }))
+  await $.session.start(START)
+  await measure($, 94)
+  expect(await until(() => w.compacted.length === 1)).toBe(true)
+})
+
+test('a session nothing was typed in has nothing to hand over: no handoff, the profile opens fresh', async ($, on) => {
+  const w = guardWorld(on, 'mikey (12%)')
+  w.files.set(TRANSCRIPT, line({ type: 'mode', mode: 'normal' }) + '\n' + line({ type: 'system', content: 'notice' }))
+  await $.session.start(START)
+  w.openedNew()
+  await measure($, 94)
+  expect(await until(() => w.ran.some((argv: string[]) => argv.join(' ').includes('claude mikey')))).toBe(true)
+  expect(w.compacted.length).toBe(0)
+  expect(w.handoff()).toBe(undefined)
+  expect(w.files.logs.some((l: string) => /empty: nothing was typed here/.test(l))).toBe(true)
 })
 
 test('another session on the same profile stops from the flag alone; Not now leaves it here, held', async ($, on) => {

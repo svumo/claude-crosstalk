@@ -557,8 +557,11 @@ export function vscodeLink(ask, scheme = "vscode") {
 
 // A new Windows Terminal window in the folder, running the command in PowerShell, where the
 // person's own `claude` functions live.
-export function windowArgv(cwd, command) {
-  return ["wt", "-w", "new", "-d", cwd, "pwsh", "-NoExit", "-Command", command];
+// With `sameWindow` (this session runs in Windows Terminal) it is a new tab of the window the
+// person is already in (-w 0 is the most recently used one) rather than a window of its own.
+export function windowArgv(cwd, command, sameWindow = false) {
+  const target = sameWindow ? ["-w", "0", "new-tab"] : ["-w", "new"];
+  return ["wt", ...target, "-d", cwd, "pwsh", "-NoExit", "-Command", command];
 }
 
 // macOS and Linux. A folder can hold any character, so it goes in single quotes; the command is
@@ -753,7 +756,69 @@ export function stopReason(stop) {
   return stop.window ? `${Math.round(stop.window.percentUsed)}% of its ${windowName(stop.window.kind)}` : "a move asked for by hand";
 }
 
-export function handoffText({ me, stop, summary, transcript, now }) {
+// Whether a transcript (the .jsonl text) holds anything the person typed. A session stopped
+// before its first message has nothing to hand over.
+export function hasConversation(text) {
+  return userTexts(text).length > 0;
+}
+
+// What the person typed, oldest first: plain text messages, not tool results, the harness's own
+// notices (they start with "<") or meta lines.
+function userTexts(text) {
+  const out = [];
+  for (const line of String(text ?? "").split("\n")) {
+    if (!line.includes('"type":"user"')) {
+      continue;
+    }
+    try {
+      const o = JSON.parse(line);
+      if (o.type !== "user" || o.isMeta) {
+        continue;
+      }
+      const c = o.message?.content;
+      const t = (typeof c === "string" ? c : Array.isArray(c) ? c.filter((b) => b?.type === "text").map((b) => b.text).join("\n") : "").trim();
+      if (t && !t.startsWith("<")) {
+        out.push(t);
+      }
+    } catch {
+      // a half-written last line
+    }
+  }
+  return out;
+}
+
+// A digest of a transcript built here, with no model call (so it costs no usage and can't fail
+// near the limit): the first request, the last few, and the last thing the assistant said.
+export function transcriptDigest(text, { recent = 4, each = 600, last = 1500 } = {}) {
+  const users = userTexts(text);
+  if (!users.length) {
+    return "";
+  }
+  const cut = (s, n) => (s.length > n ? `${s.slice(0, n)}…` : s);
+  let reply = "";
+  for (const line of String(text).split("\n")) {
+    if (!line.includes('"type":"assistant"')) {
+      continue;
+    }
+    try {
+      const blocks = JSON.parse(line).message?.content;
+      const t = (Array.isArray(blocks) ? blocks.filter((b) => b?.type === "text").map((b) => b.text).join("\n") : "").trim();
+      if (t) {
+        reply = t;
+      }
+    } catch {
+      // skip a line that isn't whole
+    }
+  }
+  const tail = users.slice(1).slice(-recent);
+  return [
+    "First request:", cut(users[0], each * 2), "",
+    ...(tail.length ? ["Latest requests, oldest first:", ...tail.map((t) => `- ${cut(t, each).replace(/\n+/g, " ")}`), ""] : []),
+    ...(reply ? ["Last assistant message:", cut(reply, last), ""] : []),
+  ].join("\n").trim();
+}
+
+export function handoffText({ me, stop, summary, digest = "", transcript, now }) {
   const reset = stop.window?.resetsAt ? `, resets ${stop.window.resetsAt}` : "";
   return [
     `# Handoff: ${me.title || me.address}`,
@@ -767,7 +832,8 @@ export function handoffText({ me, stop, summary, transcript, now }) {
     "",
     "## Summary",
     "",
-    summary || "Not compacted: the summary couldn't be made. Read the end of the transcript above for where it stood.",
+    summary || digest || "Not compacted: the summary couldn't be made. Read the end of the transcript above for where it stood.",
+    ...(!summary && digest ? ["", "(Cut from the transcript without a model call. Grep the transcript above for anything it leaves out.)"] : []),
     "",
   ].join("\n");
 }

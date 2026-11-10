@@ -267,9 +267,8 @@ For each session on that account, Crosstalk:
 
 1. Holds its wake-ups, so no message starts a turn while it's over the limit. Messages wait in its inbox.
 2. Stops the turn it's running, if any.
-3. Compacts it, as `/compact` does, asking for a summary written as a handoff.
-4. Writes that summary to `handoffs/<date>-<address>.md` in the shared folder, with the folder, the account and the transcript path, and shows it in the transcript. A desktop notification goes out too.
-5. Asks whether to move the session to another account. It offers up to three other profiles, lowest known usage first, plus "Not now". You can also type any profile name. If you pick one, that profile opens in the same folder and is told to read the handoff and carry on.
+3. Writes `handoffs/<date>-<address>.md` in the shared folder, with the folder, the account, the transcript path and a digest cut from the transcript on disk (the first request, the latest few, and the last assistant message). No model call is made, so it costs no usage. Set `usageCompact: true` in `setup.json` to have the model write a `/compact`-style summary instead. A desktop notification goes out too. A session nothing was typed in gets no handoff.
+4. Asks once whether to move the session to the other profile with the lowest known usage, or Not now. You can type any other profile name under Other. If you accept, that profile opens in the same folder (as a new tab of your Windows Terminal window when you are in one) and is told to read the handoff and carry on.
 
 The first session to see 93% writes `usage/<profile>.json` to the shared folder. Every other session on that profile, or on the same account under another profile name, checks for it every 3 seconds, so idle sessions stop too. Each session acts once per window. "Not now" holds until the window resets.
 
@@ -289,7 +288,7 @@ A session that stops early stops alone. It doesn't tell the rest of the account 
 
 ## Costs and safety
 
-- **The usage guard costs a little.** Compacting a stopped session makes one summary request on that account, using some of the last 7%.
+- **The usage guard costs nothing by default.** The handoff is cut from the transcript without a model call. Only with `usageCompact: true` does it make one summary request on the nearly spent account.
 
 - **Wake-ups use tokens.** Each message that wakes a session uses that profile's tokens or usage. After 25 wake-ups in a row, new messages wait until you type, so two sessions can't keep replying to each other forever. To change the number, set `CLAUDE_CROSSTALK_WAKE_LIMIT`.
 - **Messages are plain text on disk,** so don't send passwords or keys.

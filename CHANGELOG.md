@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.9.0
 
 **Watch a Copilot task live (Phase 2 of 5: in a terminal)**
 - **`/crosstalk-gh open [task]`** opens a terminal on the task: Copilot's words as they come, its plan, each tool it runs with the exact command and whether it is waiting, running, done or failed, and a diff of each file it changed. In the desktop app it is a Terminal-panel tab (the app asks you to approve the command); elsewhere a terminal window. A task that has ended is replayed.
@@ -34,6 +34,14 @@
 - **Fix:** when Crosstalk reloaded mid-turn (an update installed into a running session), a message the session had already had could reach the model again. The session went live before it read which messages it had had; it now reads that first.
 - **Fix:** clicking a notification switched the window to its session but left the window behind whatever you were in, as Windows won't let the app bring itself forward from a background launch. ToastHost, the program you clicked, now brings the window forward first. It logs each click's outcome to `toast-host.log`.
 - **Fix:** notifications lost the Claude logo when the app updated, since their shortcuts pointed into the old version's folder. The logo is now kept in Crosstalk's own folder (`app-windows\claude-logo.png` and `.ico`), copied again whenever the app updates, and shown beside the notification's text as well.
+
+## 1.8.3
+
+**Moving at the usage limit is one question, and costs nothing**
+- The guard no longer asks the model for a summary. That request ran on the account that was nearly spent and often failed there. The handoff is cut from the transcript on disk instead: the first request, the latest few, and the last thing the assistant said, plus the transcript path. Set `usageCompact: true` in `setup.json` to bring the model summary back. It is still used if the transcript can not be read.
+- One offer: move to the lowest-usage profile, or Not now. Any other profile can still be typed under Other, and the question names them.
+- A session nothing was typed in (a fresh chat) has nothing to hand over, so no handoff is written and the profile opens empty.
+- In Windows Terminal, `open` and the move start a new **tab of the window you are in** (`wt -w 0 new-tab`) instead of a new window. `--in window` still opens a window of its own.
 
 ## 1.8.2
 
