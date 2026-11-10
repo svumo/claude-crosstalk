@@ -10,6 +10,7 @@ import type { Decision } from "../protocol/schema.ts";
 export type CopilotCommand =
   | { verb: "task"; task: string }
   | { verb: "status" }
+  | { verb: "setup" }
   | { verb: "decide"; decision: Decision; requestId: string; taskId: string }
   | { verb: "stop"; taskId: string }
   | { verb: "help" };
@@ -28,6 +29,9 @@ export function parseCopilot(args: string): CopilotCommand {
   if (first === "status" && words.length === 1) {
     return { verb: "status" };
   }
+  if (first === "setup" && words.length === 1) {
+    return { verb: "setup" };
+  }
   const taskId = words.length === 3 || (first === "stop" && words.length === 2) ? (words.at(-1) ?? "") : "";
   if (first === "stop" && words.length <= 2 && (taskId === "" || isTaskId(taskId))) {
     return { verb: "stop", taskId };
@@ -44,6 +48,7 @@ export const HELP = [
   "/copilot status shows this session's tasks and any request waiting for you.",
   "/copilot approve <request>, /copilot allow <request> (for the rest of the task) and /copilot deny <request> answer Copilot's requests. Only you can.",
   "/copilot stop [task] stops a task.",
+  "/copilot setup installs the Copilot SDK that tasks run on, and checks who Copilot is signed in as. Without it, tasks run on Copilot CLI over ACP.",
 ].join("\n");
 
 const age = (ms: number): string => {

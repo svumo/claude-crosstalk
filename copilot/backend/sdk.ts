@@ -59,6 +59,9 @@ type Turn = {
   usage: TokenUsage;
   // Messages that streamed in pieces, so their whole text is not shown a second time.
   streamed: Set<string>;
+  // A refused request makes the SDK abort the turn itself; a cancel of ours does too. These say which.
+  refused: boolean;
+  cancelling: boolean;
   end: (result: TurnResult) => void;
   fail: (error: Error) => void;
 };
@@ -120,7 +123,7 @@ export class SdkBackend implements CopilotBackend {
         this.turn = null;
       };
       this.turn = {
-        handlers, usage: noUsage(), streamed: new Set(),
+        handlers, usage: noUsage(), streamed: new Set(), refused: false, cancelling: false,
         end: (result) => { done(); resolve(result); },
         fail: (error) => { done(); reject(error); },
       };
@@ -129,6 +132,9 @@ export class SdkBackend implements CopilotBackend {
   }
 
   async cancel(): Promise<void> {
+    if (this.turn) {
+      this.turn.cancelling = true;
+    }
     await this.session?.abort();
   }
 
@@ -152,7 +158,12 @@ export class SdkBackend implements CopilotBackend {
     if (ask.toolId !== "") {
       this.asked.set(ask.toolId, ask);
     }
-    return resultFor(this.turn ? await this.turn.handlers.onPermission(ask) : "reject");
+    const turn = this.turn;
+    const answer = turn ? await turn.handlers.onPermission(ask) : "reject";
+    if (turn && answer === "reject") {
+      turn.refused = true;
+    }
+    return resultFor(answer);
   }
 
   private onEvent(event: SdkEvent): void {
@@ -179,7 +190,7 @@ export class SdkBackend implements CopilotBackend {
         turn.usage = addUsage(turn.usage, usageOf(data));
         return;
       case "session.idle":
-        turn.end({ stop: data.aborted === true ? "cancelled" : "end_turn", usage: turn.usage });
+        turn.end({ stop: data.aborted !== true ? "end_turn" : turn.refused && !turn.cancelling ? "denied" : "cancelled", usage: turn.usage });
         return;
       case "session.error":
         turn.fail(new Error(`Copilot reported an error: ${String(data.message ?? data.errorType ?? "unknown")}`));

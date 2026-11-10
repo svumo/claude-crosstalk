@@ -82,6 +82,8 @@ const putState = (files: any, state: TaskStateFile) => files.set(`${BOX}/copilot
 test('what follows /copilot is a command only in its exact shape, else a task in the person\'s words', async () => {
   expect(parseCopilot('')).toEqual({ verb: 'help' })
   expect(parseCopilot('status')).toEqual({ verb: 'status' })
+  expect(parseCopilot('setup')).toEqual({ verb: 'setup' })
+  expect(parseCopilot('setup the database migrations')).toEqual({ verb: 'task', task: 'setup the database migrations' })
   expect(parseCopilot('approve r3')).toEqual({ verb: 'decide', decision: 'approve', requestId: 'r3', taskId: '' })
   expect(parseCopilot('allow r3 fix-login-x9q2')).toEqual({ verb: 'decide', decision: 'allow_task', requestId: 'r3', taskId: 'fix-login-x9q2' })
   expect(parseCopilot('deny r12')).toEqual({ verb: 'decide', decision: 'deny', requestId: 'r12', taskId: '' })

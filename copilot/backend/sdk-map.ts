@@ -54,8 +54,13 @@ function unaskedKind(data: Bag): ToolKind {
   return data.readOnly === true ? "read" : "other";
 }
 
-// A tool starting or ending, as a tool event. `asked` holds the requests the person was put, by
+// A tool announced or ending, as a tool event. `asked` holds the requests the person was put, by
 // tool call id, so the event carries the same kind, command and paths the request did.
+//
+// The SDK sends tool.execution_start before its permission request (seen live on 1.0.30: start,
+// then the request some milliseconds later, then the end). So a start is "pending": the call has
+// been announced, not run. Whether it ran is judged at its end, where a success with no approval
+// on record is a breach.
 export function toolOf(type: string, data: unknown, asked: Map<string, PermissionAsk>, known: Map<string, ToolEvent>): ToolEvent {
   const d = bag(data);
   const id = text(d.toolCallId);
@@ -67,7 +72,7 @@ export function toolOf(type: string, data: unknown, asked: Map<string, Permissio
     id,
     kind: ask?.kind ?? before?.kind ?? unaskedKind(d),
     title: text(d.toolTitle) || text(d.toolName) || (before?.title ?? ""),
-    status: isStart ? "running" : d.success === true ? "done" : "failed",
+    status: isStart ? "pending" : d.success === true ? "done" : "failed",
     ...(ask?.command ? { command: ask.command } : before?.command ? { command: before.command } : {}),
     paths: ask?.paths ?? before?.paths ?? [],
     diffs: [],

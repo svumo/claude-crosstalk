@@ -8,7 +8,15 @@ This is **Phase 1**: it works from the command line and the transcript. A live t
 
 - A git repository with at least one commit.
 - Node.js 22.18 or newer (`node --version`).
-- GitHub Copilot CLI 1.0.105 or newer, signed in with your personal GitHub account: run `copilot login` yourself, in a terminal. Crosstalk never sees or stores a token. Versions before 1.0.105 could run tools without asking, so Crosstalk refuses them.
+- Copilot signed in with your personal GitHub account: run `copilot login` yourself, in a terminal. Crosstalk never sees or stores a token.
+- Then, once: `/copilot setup`. It installs the official Copilot SDK (`@github/copilot-sdk`, a pinned version, with npm install scripts off) into `~/.claude-crosstalk/copilot/runtime`, and checks who Copilot is signed in as. Nothing goes into your project or the plugin. Only you can run it: Claude can't run it for you.
+
+## Two ways Copilot is driven
+
+- **The SDK (the default once `/copilot setup` has run).** The SDK checks every tool call before it runs. When you refuse a request it ends Copilot's turn, and the reply says so; a follow-up can tell Copilot another way to go.
+- **Copilot CLI over ACP** (without setup, or with `"backend": "acp"`). This needs Copilot CLI 1.0.105 or newer on your PATH. Earlier versions could run tools without asking, so Crosstalk refuses them. A refused request is passed to Copilot, which carries on without it.
+
+Either way, the safety self-test and the stop-for-safety check below apply.
 
 ## Use it
 
@@ -26,6 +34,7 @@ Crosstalk records where the session is (folder, repository, branch, commit, the 
 | `/copilot allow <request>` | Allows it, and the same kind for the rest of the task (see below) |
 | `/copilot deny <request>` | Refuses it |
 | `/copilot stop [task]` | Stops a task; its branch and worktree are kept |
+| `/copilot setup` | Installs the Copilot SDK and checks the sign-in (run it again to repair) |
 
 Sending a follow-up is an ordinary Crosstalk message to the task (`/crosstalk to copilot/<task> ...`, or ask Claude to send it). Only the session that started a task can add to it, and the task stays up for ten minutes after each turn to hear one.
 
@@ -64,11 +73,15 @@ When a turn ends, the session that asked gets a message with what Copilot report
   "worktreeRoot": "C:/wt/my-repo-copilot",
   "permissionTimeoutMs": 600000,
   "turnTimeoutMs": 1800000,
-  "idleMs": 600000
+  "idleMs": 600000,
+  "backend": "auto",
+  "account": "your-github-login"
 }
 ```
 
 On Windows, a short `worktreeRoot` keeps paths under the length limit.
+
+`backend` is `auto` (the SDK when it is installed, otherwise ACP), `sdk` or `acp`. `account` pins the GitHub login Copilot must be signed in as on the SDK. A task signed in as anyone else is refused, which keeps a work account's Copilot off personal tasks.
 
 ## Where things are kept
 
@@ -82,13 +95,13 @@ Under `~/.claude-crosstalk/copilot/`:
 
 Run these in a real session, in a repository you don't mind a test branch in. Each step says what you should see.
 
-1. `copilot --version` in a terminal shows 1.0.105 or newer, and `copilot` starts signed in.
+1. `/copilot setup` in a Claude session says `Installed @github/copilot-sdk@...` and `Copilot ... is signed in as <your login>`. (To test ACP instead, set `"backend": "acp"` and check that `copilot --version` shows 1.0.105 or newer.)
 2. In a Claude session in that repository: `/copilot Add a file called HELLO.md that says hello`. You see `Copilot task add-a-file-... started, on branch copilot/...`.
 3. Within a minute a request appears: `Copilot task ... asks to write to inside its worktree (low risk)` with the path, and a notice. `/copilot status` shows the task `awaiting approval`.
 4. `/copilot approve r1`. You see `Approved: r1 of ...`.
 5. A Crosstalk message arrives: `Copilot task ... finished`, with a diff stat naming `HELLO.md`, the branch, and the three commands.
 6. `git status` in your own checkout is unchanged. Run the review command from the reply: it shows the new file.
-7. Start another task that needs a command, such as `/copilot Run the tests and tell me what fails`. The request shows the exact command and `high risk`. `/copilot deny r1`. The reply says Copilot was not allowed.
+7. Start another task that needs a command, such as `/copilot Run the tests and tell me what fails`. The request shows the exact command and `high risk`. `/copilot deny r1`. On the SDK the reply says Copilot stopped when its request was refused; on ACP it says Copilot was not allowed.
 8. Start a third task and leave its request unanswered, then `/copilot stop`. The reply says it was stopped.
 9. Clean up with the discard command from each reply.
 
@@ -99,4 +112,4 @@ What step 2 does on the first task only: the safety self-test runs first, so the
 - Copilot's work is not shown live; `/copilot status` and the reply are the view. (Phase 2: a terminal view you can also answer from.)
 - No chat of its own in the desktop app's sidebar (Phase 3), no pane or status line (Phase 4).
 - Messages are not signed (Phase 5). Until then, treat `~/.claude-crosstalk` as you treat any folder only you can write to.
-- The Copilot SDK backend is not built yet; tasks run over Copilot CLI's ACP server, guarded by the version floor, the self-test and the stop-for-safety check.
+- Quota is not shown yet: the SDK can report it, and the status line in Phase 4 will.

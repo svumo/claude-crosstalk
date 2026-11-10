@@ -61,7 +61,7 @@ export async function startCopilot($: Engine, given: Host): Promise<void> {
   await $.command.register({
     name: "copilot",
     description: "Hands a task to GitHub Copilot CLI in its own git worktree. status shows tasks; approve, allow and deny answer its requests; stop ends one.",
-    argumentHint: "<task> | status | approve <request> | deny <request> | stop",
+    argumentHint: "<task> | status | approve <request> | deny <request> | stop | setup",
   });
 }
 
@@ -164,6 +164,22 @@ async function stop($: Engine, root: string, sessionId: string, named: string): 
   return `Stopping ${picked.state.task_id}. Its branch and worktree are kept; the reply says how to discard them.`;
 }
 
+// Installing software is the person's call, so only a command they typed runs it (build choice).
+async function runSetup($: Engine, root: string, origin: Origin): Promise<string> {
+  if (!isPerson(origin)) {
+    return "Only you can run /copilot setup: type the command yourself.";
+  }
+  const fault = await nodeFault($);
+  if (fault !== "") {
+    return fault;
+  }
+  const ran = await $.process.run(["node", `${$.plugin.root}/copilot/sidecar/main.ts`, "setup", "--root", root], { timeoutMs: 300_000 }).catch(() => null);
+  if (!ran) {
+    return "Couldn't run Copilot setup.";
+  }
+  return (ran.stdout.trim() || ran.stderr.trim().slice(0, 600) || (ran.exitCode === 0 ? "Copilot setup finished." : "Copilot setup failed."));
+}
+
 async function copilotCommand($: Engine, args: string, origin: Origin): Promise<string> {
   const me = host?.who() ?? null;
   if (!host || !me) {
@@ -178,6 +194,8 @@ async function copilotCommand($: Engine, args: string, origin: Origin): Promise<
       const now = await $.clock.now();
       return states.length === 0 ? "This session has handed Copilot no tasks. /copilot <task> starts one." : states.slice(0, SHOWN_TASKS).map((s) => statusLine(s, now)).join("\n");
     }
+    case "setup":
+      return runSetup($, host.root, origin);
     case "decide":
       return decide($, host.root, me.id, command.decision, command.requestId, command.taskId, origin);
     case "stop":

@@ -1,7 +1,9 @@
 // The Copilot sidecar's entry point: one process for one task.
 //
 //   node copilot/sidecar/main.ts run <task id> --root <Crosstalk's folder>
-//   node copilot/sidecar/main.ts start <task id> --root <Crosstalk's folder>   (starts `run` apart from the caller, and returns)//
+//   node copilot/sidecar/main.ts start <task id> --root <Crosstalk's folder>   (starts `run` apart from the caller, and returns)
+//   node copilot/sidecar/main.ts setup --root <Crosstalk's folder>              (installs the Copilot SDK, checks the sign-in)
+//
 // Settings come from <root>/copilot/config.json. The backend command comes from there too, never
 // from the task, so a handoff cannot name a program to run.
 
@@ -17,6 +19,7 @@ import { taskPaths } from "../protocol/layout.ts";
 import { childEnv } from "./env.ts";
 import { privateDir } from "./files.ts";
 import { chooseBackend, readSettings } from "./settings.ts";
+import { setup } from "./setup.ts";
 import { runTask } from "./task.ts";
 
 function rootFrom(args: string[]): string {
@@ -51,8 +54,14 @@ function start(taskId: string, root: string): number {
 
 async function main(): Promise<number> {
   const [verb, taskId, ...rest] = process.argv.slice(2);
+  if (verb === "setup") {
+    const root = rootFrom(process.argv.slice(3));
+    const done = await setup(root, readSettings(root).account);
+    process.stdout.write(`${done.text}\n`);
+    return done.ok ? 0 : 1;
+  }
   if ((verb !== "run" && verb !== "start") || !isTaskId(taskId)) {
-    process.stderr.write("Usage: main.ts run|start <task id> [--root <folder>]\n");
+    process.stderr.write("Usage: main.ts run|start <task id> [--root <folder>] | setup [--root <folder>]\n");
     return 2;
   }
   const root = rootFrom(rest);

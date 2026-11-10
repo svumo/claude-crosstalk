@@ -27,8 +27,10 @@ export type PermissionAnswer = "allow" | "reject";
 
 export type TokenUsage = { inputTokens: number; outputTokens: number; cachedTokens: number };
 
+// "denied": the backend ended the turn itself because a permission request was refused (the SDK
+// does this; ACP tells the model and carries on).
 export type TurnResult = {
-  stop: "end_turn" | "cancelled" | "max_tokens" | "refusal" | "other";
+  stop: "end_turn" | "cancelled" | "denied" | "max_tokens" | "refusal" | "other";
   usage: TokenUsage;
 };
 

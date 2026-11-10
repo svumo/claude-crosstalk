@@ -66,7 +66,11 @@ const OUTCOME: Record<TurnEnd["kind"], ReplyBody["outcome"]> = { done: "complete
 
 function detailOf(end: TurnEnd): string {
   switch (end.kind) {
-    case "done": return end.result.stop === "end_turn" ? "" : `Copilot's turn ended early (${end.result.stop}).`;
+    case "done":
+      if (end.result.stop === "denied") {
+        return "Copilot stopped when one of its requests was refused. A follow-up can tell it another way to go.";
+      }
+      return end.result.stop === "end_turn" ? "" : `Copilot's turn ended early (${end.result.stop}).`;
     case "stopped": return "Stopped at your request.";
     case "timeout": return "Stopped: the turn ran past its time limit.";
     case "breach": return `STOPPED FOR SAFETY. ${end.detail}. Copilot was ended at once; check the worktree before using anything from it.`;

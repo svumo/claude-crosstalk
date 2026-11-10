@@ -8,7 +8,8 @@
 - If Copilot runs a tool without asking, Crosstalk ends it at once and says so. Copilot CLI before 1.0.105 could do that, so it is refused, and each new version must pass a small self-test before it gets a task.
 - `/copilot status` shows this session's tasks and what each has used; `/copilot stop` ends one. A task is limited to 5 prompts and 100 AI credits.
 - A task is a Crosstalk peer (`copilot/<task>`): the session that started it can send it a follow-up.
-- Needs Node.js 22.18 or newer and Copilot CLI signed in by you (`copilot login`). Crosstalk handles no tokens. See [docs/copilot.md](docs/copilot.md).
+- `/copilot setup` installs the official Copilot SDK (pinned, install scripts off) into Crosstalk's own folder, and tasks then run on it: it checks every tool call before it runs. Without it, tasks run on Copilot CLI over ACP. `"account"` in the settings pins the GitHub login Copilot must be signed in as.
+- Needs Node.js 22.18 or newer and Copilot signed in by you (`copilot login`). Crosstalk handles no tokens. See [docs/copilot.md](docs/copilot.md).
 - Messages have a version 1 format that today's sessions still read as before.
 
 ## 1.8.2
