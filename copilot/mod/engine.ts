@@ -9,6 +9,8 @@ export type Engine = {
   ui: {
     toast(text: string): void;
     log(text: string): void;
+    // The engine's own AskUserQuestion dialog; resolves to the label chosen, rejects when dismissed.
+    ask(question: string, options?: readonly string[] | { options?: readonly string[]; header?: string }): Promise<string>;
     invalidate(event: string): void;
     resolve(e: unknown): { Box: (props: Record<string, unknown>) => unknown; Text: (props: Record<string, unknown>) => unknown; Svg?: (props: Record<string, unknown>) => unknown };
   };

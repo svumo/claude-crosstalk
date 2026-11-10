@@ -54,13 +54,15 @@ export function taskPieces(state: TaskStateFile, now: number, columns: number): 
   const id = shortId(state.task_id);
   const used = state.usage.input_tokens + state.usage.output_tokens;
   const spent: Piece[] = used > 0 && columns >= 90 ? [{ text: "·", color: PALETTE.muted }, { text: `${tokens(used)} tok`, color: PALETTE.fg }] : [];
+  // A live task that isn't asking: bypass in red, so it's never forgotten, auto muted.
+  const mode: Piece[] = state.mode === "bypass" ? [{ text: "bypass", color: PALETTE.red, bold: true }] : state.mode === "auto" ? [{ text: "auto", color: PALETTE.muted }] : [];
   switch (state.state) {
     case "starting":
     case "working":
-      return [{ text: "●", color: PALETTE.green }, { text: id, color: PALETTE.pink }, { text: `${state.state} ${ago(now - state.started_at)}`, color: PALETTE.green }, ...spent];
+      return [{ text: "●", color: PALETTE.green }, { text: id, color: PALETTE.pink }, ...mode, { text: `${state.state} ${ago(now - state.started_at)}`, color: PALETTE.green }, ...spent];
     case "awaiting_approval": {
-      const ask = state.pending[0] ? `/copilot approve ${state.pending[0]}` : "needs you";
-      return [{ text: "●", color: PALETTE.orange }, { text: id, color: PALETTE.pink }, { text: `waiting: ${ask}`, color: PALETTE.orange, bold: true }];
+      const ask = state.pending[0] ? `answer ${state.pending[0]}` : "needs you";
+      return [{ text: "●", color: PALETTE.orange }, { text: id, color: PALETTE.pink }, ...mode, { text: `waiting: ${ask}`, color: PALETTE.orange, bold: true }];
     }
     case "idle":
       return [{ text: "●", color: PALETTE.muted }, { text: id, color: PALETTE.pink }, { text: "turn done", color: PALETTE.muted }, ...spent];

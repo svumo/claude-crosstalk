@@ -63,18 +63,18 @@ export function permissionTarget(body: PermissionRequestBody): string {
 // plain message, a task, a reply). A permission request is the person's to answer, so a session
 // shows it and never hands it to its model. Status, event and decision messages have no business
 // in a session's inbox and are shown nowhere.
-export function personOnly(message: unknown): { toast: string; log: string } | null {
+// A permission request comes back as `ask`, for the session to put to the person as a dialog.
+export function personOnly(message: unknown): { ask: PermissionRequestBody | null } | null {
   if (typeof message !== "object" || message === null) {
     return null;
   }
-  const m = message as { schema_version?: unknown; kind?: unknown; text?: unknown; body?: { request_id?: unknown } };
+  const m = message as { schema_version?: unknown; kind?: unknown; text?: unknown; body?: Partial<PermissionRequestBody> };
   if (m.schema_version !== 1 || m.kind === "task" || m.kind === "reply" || typeof m.kind !== "string") {
     return null;
   }
-  if (m.kind !== "permission_request") {
-    return { toast: "", log: "" };
-  }
-  return { toast: `Copilot is waiting for your answer: /copilot approve ${String(m.body?.request_id ?? "")} or deny`, log: String(m.text ?? "") };
+  const body = m.body;
+  const isRequest = m.kind === "permission_request" && typeof body?.task_id === "string" && typeof body.request_id === "string" && typeof body.tool_kind === "string";
+  return { ask: isRequest ? (body as PermissionRequestBody) : null };
 }
 
 export function permissionText(body: PermissionRequestBody): string {

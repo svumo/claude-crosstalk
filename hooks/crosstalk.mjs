@@ -29,6 +29,7 @@ import {
   shortcutBlock, shortcutsIn, tilde, withoutBlock,
 } from "./setup.mjs";
 import { registerCopilot, startCopilot } from "../copilot/mod/register.ts";
+import { askPermission } from "../copilot/mod/prompt.ts";
 import { personOnly } from "../copilot/protocol/render.ts";
 
 const POLL_MS = 3_000;
@@ -1337,12 +1338,10 @@ async function readInbox($) {
     const message = await readJson($, `${root}/inbox/${me.id}/${name}`, null);
     const forPerson = personOnly(message);
     if (forPerson) {
-      // A Copilot request is the person's to answer: it is shown, and never handed to the model.
-      if (forPerson.toast) {
-        $.ui.toast(forPerson.toast);
-      }
-      if (forPerson.log) {
-        $.ui.log(forPerson.log);
+      // A Copilot request is the person's to answer: it pops up as a dialog for them, and is never
+      // handed to the model. Not awaited, so an open dialog doesn't hold up the inbox.
+      if (forPerson.ask) {
+        void askPermission($, root, forPerson.ask);
       }
       delivered.add(name);
       hasShown = true;

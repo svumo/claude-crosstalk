@@ -93,6 +93,20 @@ test('what follows /copilot is a command only in its exact shape, else a task in
   expect(parseCopilot('stop the flaky test from failing')).toEqual({ verb: 'task', task: 'stop the flaky test from failing' })
   expect(parseCopilot('approve the design doc and tidy it')).toEqual({ verb: 'task', task: 'approve the design doc and tidy it' })
   expect(parseCopilot('status of the build is red, fix it')).toEqual({ verb: 'task', task: 'status of the build is red, fix it' })
+  // modes and models
+  expect(parseCopilot('--bypass add a README')).toEqual({ verb: 'task', task: 'add a README', mode: 'bypass' })
+  expect(parseCopilot('--mode auto --model gpt-6.1-sol add a README')).toEqual({ verb: 'task', task: 'add a README', mode: 'auto', model: 'gpt-6.1-sol' })
+  expect(parseCopilot('--mode=bypass  keep  my spacing')).toEqual({ verb: 'task', task: 'keep  my spacing', mode: 'bypass' })
+  expect(parseCopilot('--mode yolo fix it').verb).toBe('error')
+  expect(parseCopilot('--bypass').verb).toBe('error')
+  expect(parseCopilot('mode')).toEqual({ verb: 'mode', mode: '', taskId: '' })
+  expect(parseCopilot('mode bypass')).toEqual({ verb: 'mode', mode: 'bypass', taskId: '' })
+  expect(parseCopilot('mode ask fix-login-x9q2')).toEqual({ verb: 'mode', mode: 'ask', taskId: 'fix-login-x9q2' })
+  expect(parseCopilot('mode the tests so they pass')).toEqual({ verb: 'task', task: 'mode the tests so they pass' })
+  expect(parseCopilot('models')).toEqual({ verb: 'models' })
+  expect(parseCopilot('model')).toEqual({ verb: 'models' })
+  expect(parseCopilot('model claude-opus-5.5')).toEqual({ verb: 'model', model: 'claude-opus-5.5' })
+  expect(parseCopilot('model the data layer')).toEqual({ verb: 'task', task: 'model the data layer' })
 })
 
 test('a status line says how a task stands and what waits on the person', async () => {
@@ -125,8 +139,8 @@ test('/copilot <task> captures the session, writes the handoff and starts the si
   expect(envelope.context.claude).toMatchObject({ profile: 'work', session_id: 'self-1', model: 'fable' })
   expect(envelope.context.instructions).toEqual([{ path: 'AGENTS.md', bytes: 5 }])
   expect(envelope.context.files_touched).toEqual(['src/login.ts'])
-  expect(text).toMatch(new RegExp(`^Copilot task ${id} started, on branch copilot/${id} cut from main \\(0123456789ab\\)`))
-  expect(text).toMatch(/Your uncommitted changes \(1 file\) are not in its worktree/)
+  expect(text).toMatch(new RegExp(`^Copilot task ${id} started in ask mode, on branch copilot/${id} from main\\.`))
+  expect(text).toMatch(/Your uncommitted changes \(1 file\) aren't in its worktree/)
 })
 
 test('a session in a worktree hands over the main working tree as the place for Copilot\'s worktrees', async ($, on) => {
@@ -207,24 +221,52 @@ test('a running task is a Crosstalk peer: a session can send it a follow-up by i
   expect(message.text).toBe('also update the changelog')
 })
 
-test('a permission request in the inbox is shown to the person and never starts a turn', async ($, on) => {
+test('a permission request in the inbox pops up as a dialog, and the pick is a decision file; it never starts a turn', async ($, on) => {
   const { files } = computer(on)
   const submitted: string[] = []
+  const asked: any[] = []
   on('prompt.submit', (_: any, e: any) => { submitted.push(e.text); return { text: e.text, origin: e.origin } })
+  on('tool.call', { tool: 'AskUserQuestion' }, (_: any, e: any) => {
+    asked.push(e)
+    const q = e.questions[0]
+    return { result: { questions: e.questions, answers: { [q.question]: 'Bypass this task' } } }
+  })
   await $.session.start(START)
+  putState(files, stateOf({}))
   const body: PermissionRequestBody = { task_id: 'fix-login-x9q2', request_id: 'r1', tool_kind: 'shell', title: 'Check', command: 'npm test', scope: 'none', risk: 'high', task_grant: 'commands starting "npm test"', expires_at: NOW + 1 }
   const request = makeEnvelope({ id: 'p1', thread_id: 't', from: 'copilot/fix-login-x9q2', fromId: 'copilot-fix-login-x9q2', to: 'work/proj-self', sent_at: NOW, kind: 'permission_request', body, text: permissionText(body) })
-  expect(personOnly(request)?.log).toContain('npm test')
+  expect(personOnly(request)?.ask?.command).toBe('npm test')
   expect(personOnly({ from: 'a', text: 'hello' })).toBeNull()
   expect(personOnly({ ...request, kind: 'reply' })).toBeNull()
-  expect(personOnly({ ...request, kind: 'permission_decision' })).toEqual({ toast: '', log: '' })
+  expect(personOnly({ ...request, kind: 'permission_decision' })).toEqual({ ask: null })
   files.set(`${BOX}/inbox/self-1/000000001000000-a.json`, JSON.stringify(request))
   files.tick()
   await settle()
+  await settle()
   expect(submitted.length).toBe(0)
-  expect(files.toasts.at(-1)).toMatch(/Copilot is waiting for your answer: \/copilot approve r1/)
-  expect(files.logs.at(-1)).toContain('npm test')
+  expect(files.logs.length).toBe(0)
+  expect(asked[0]?.questions[0].question).toBe('Copilot wants to run: npm test (high risk). Allow it?')
+  expect(asked[0]?.questions[0].options.map((o: any) => o.label)).toEqual(['Approve', 'Allow for task', 'Deny', 'Bypass this task'])
+  expect(JSON.parse(files.get(`${BOX}/copilot/tasks/fix-login-x9q2/decisions/r1.json`))).toEqual({ request_id: 'r1', decision: 'approve', decided_by: 'button', at: NOW })
+  expect(JSON.parse(files.get(`${BOX}/copilot/tasks/fix-login-x9q2/mode.json`)).mode).toBe('bypass')
   expect(JSON.parse(files.get(`${BOX}/inbox/self-1/_delivered.json`))).toEqual(['000000001000000-a.json'])
+})
+
+test('/copilot mode lists or sets the mode, switches running tasks, and only the person may change it', async ($, on) => {
+  const { files } = computer(on)
+  on('tool.call', { tool: 'AskUserQuestion' }, (_: any, e: any) => ({ result: { questions: e.questions, answers: { [e.questions[0].question]: 'Auto' } } }))
+  await $.session.start(START)
+  putState(files, stateOf({ state: 'working', pending: [] }))
+  putState(files, stateOf({ task_id: 'done-cccc', state: 'completed', pending: [] }))
+  expect(await say($, 'mode bypass', { kind: 'plugin', name: 'other' })).toMatch(/^Only you can change/)
+  expect(await say($, 'mode bypass')).toBe('Copilot mode: bypass, approves everything without asking. New tasks start in it; switched the running task too.')
+  expect(JSON.parse(files.get(`${BOX}/copilot/config.json`)).mode).toBe('bypass')
+  expect(JSON.parse(files.get(`${BOX}/copilot/tasks/fix-login-x9q2/mode.json`)).mode).toBe('bypass')
+  expect(files.has(`${BOX}/copilot/tasks/done-cccc/mode.json`)).toBe(false)
+  // with no mode named, the picker asks
+  expect(await say($, 'mode')).toMatch(/^Copilot mode: auto,/)
+  expect(JSON.parse(files.get(`${BOX}/copilot/config.json`)).mode).toBe('auto')
+  expect(await say($, '--bypass fix it', { kind: 'plugin', name: 'other' })).toMatch(/^Only you can pick/)
 })
 
 // The skins band as the engine hands it on: meters spread across the row, then Compact.

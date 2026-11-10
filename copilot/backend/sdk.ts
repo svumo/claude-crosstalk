@@ -39,6 +39,7 @@ type SdkClient = {
   forceStop(): Promise<void>;
   getStatus(): Promise<{ version: string }>;
   getAuthStatus(): Promise<{ isAuthenticated: boolean; login?: string; statusMessage?: string }>;
+  listModels?(): Promise<SdkModel[]>;
   createSession(config: {
     workingDirectory: string;
     model?: string;
@@ -50,6 +51,28 @@ type SdkClient = {
 type SdkModule = {
   CopilotClient: new (options: { workingDirectory: string; env: Record<string, string>; useLoggedInUser: boolean; logLevel: "error" }) => SdkClient;
 };
+
+// A model as the SDK lists it; only the fields shown are named.
+export type SdkModel = { id: string; name: string; policy?: { state: string }; billing?: { multiplier?: number } };
+
+// The models Copilot offers the signed-in account, as `id`, display name and price multiplier.
+// Throws when the SDK is not installed or the client cannot start.
+export async function listSdkModels(entry: string, env: Record<string, string>, cwd: string): Promise<SdkModel[]> {
+  if (!existsSync(entry)) {
+    throw new BackendGone("the Copilot SDK is not installed: run /copilot setup");
+  }
+  const sdk = (await import(pathToFileURL(entry).href)) as SdkModule;
+  const client = new sdk.CopilotClient({ workingDirectory: cwd, env, useLoggedInUser: true, logLevel: "error" });
+  try {
+    await client.start();
+    if (typeof client.listModels !== "function") {
+      throw new Error("this version of the Copilot SDK cannot list models; run /copilot setup to update it");
+    }
+    return await client.listModels();
+  } finally {
+    await client.stop().catch(() => client.forceStop().catch(() => {}));
+  }
+}
 
 const STOP_GRACE_MS = 5_000;
 const bag = (v: unknown): Record<string, unknown> => (typeof v === "object" && v !== null ? (v as Record<string, unknown>) : {});

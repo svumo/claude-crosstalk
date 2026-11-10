@@ -3,6 +3,7 @@
 //   node copilot/sidecar/main.ts run <task id> --root <Crosstalk's folder>
 //   node copilot/sidecar/main.ts start <task id> --root <Crosstalk's folder>   (starts `run` apart from the caller, and returns)
 //   node copilot/sidecar/main.ts setup --root <Crosstalk's folder>              (installs the Copilot SDK, checks the sign-in)
+//   node copilot/sidecar/main.ts models --root <Crosstalk's folder>             (the models Copilot offers, as one line of JSON)
 //
 // Settings come from <root>/copilot/config.json. The backend command comes from there too, never
 // from the task, so a handoff cannot name a program to run.
@@ -13,7 +14,7 @@ import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { AcpBackend, copilotAcpCommand } from "../backend/acp.ts";
-import { SdkBackend, sdkEntry } from "../backend/sdk.ts";
+import { listSdkModels, SdkBackend, sdkEntry } from "../backend/sdk.ts";
 import { isTaskId } from "../protocol/ids.ts";
 import { taskPaths } from "../protocol/layout.ts";
 import { parseQuota, QUOTA_ARGV } from "../protocol/quota.ts";
@@ -69,8 +70,20 @@ async function main(): Promise<number> {
     process.stdout.write(`${done.text}\n`);
     return done.ok ? 0 : 1;
   }
+  if (verb === "models") {
+    const root = rootFrom(process.argv.slice(3));
+    try {
+      const models = await listSdkModels(sdkEntry(root), childEnv(process.env), homedir());
+      const shown = models.map((m) => ({ id: m.id, name: m.name, multiplier: m.billing?.multiplier ?? null, enabled: m.policy?.state !== "disabled" }));
+      process.stdout.write(`${JSON.stringify({ ok: true, models: shown, default: readSettings(root).model })}\n`);
+      return 0;
+    } catch (error) {
+      process.stdout.write(`${JSON.stringify({ ok: false, error: error instanceof Error ? error.message : String(error) })}\n`);
+      return 1;
+    }
+  }
   if ((verb !== "run" && verb !== "start") || !isTaskId(taskId)) {
-    process.stderr.write("Usage: main.ts run|start <task id> [--root <folder>] | setup [--root <folder>]\n");
+    process.stderr.write("Usage: main.ts run|start <task id> [--root <folder>] | setup [--root <folder>] | models [--root <folder>]\n");
     return 2;
   }
   const root = rootFrom(rest);

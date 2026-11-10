@@ -8,7 +8,7 @@ import { detectHost } from '../copilot/context/surface.ts'
 import { eventName, taskPaths } from '../copilot/protocol/layout.ts'
 import { emptyUsage } from '../copilot/protocol/schema.ts'
 import { addTurn, creditsFor, DEFAULT_CAPS, spent } from '../copilot/sidecar/budget.ts'
-import { classify, hostOf, isCovered, shellPrefix } from '../copilot/sidecar/policy.ts'
+import { autoApproves, classify, hostOf, isCovered, shellPrefix } from '../copilot/sidecar/policy.ts'
 import type { Grant } from '../copilot/sidecar/policy.ts'
 import { Tripwire } from '../copilot/sidecar/tripwire.ts'
 
@@ -191,4 +191,13 @@ test('task files have fixed places, and events sort by name', async () => {
   expect(paths.task).toBe('C:/Users/me/.claude-crosstalk/copilot/tasks/fix-login-x9q2/task.json')
   expect(paths.decisions).toBe('C:/Users/me/.claude-crosstalk/copilot/tasks/fix-login-x9q2/decisions')
   expect([eventName(10), eventName(9)].sort()).toEqual(['00000009.json', '00000010.json'])
+})
+
+test('a mode approves on its own only what it says: bypass all, auto worktree reads and writes, ask nothing', async () => {
+  const inside = { tool_kind: 'write', scope: 'worktree' } as const
+  const outside = { tool_kind: 'write', scope: 'outside' } as const
+  const shell = { tool_kind: 'shell', scope: 'none' } as const
+  expect([inside, outside, shell].map((r) => autoApproves('ask', r))).toEqual([false, false, false])
+  expect([inside, outside, shell].map((r) => autoApproves('auto', r))).toEqual([true, false, false])
+  expect([inside, outside, shell].map((r) => autoApproves('bypass', r))).toEqual([true, true, true])
 })

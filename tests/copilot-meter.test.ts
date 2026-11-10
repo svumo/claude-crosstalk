@@ -91,7 +91,8 @@ test('the ring joins the skins meters, after 7d, and stays apart when there is n
 test('the task beside the ring has a live dot while Copilot works', async () => {
   const words = (pieces: { text: string }[]) => pieces.map((p) => p.text).join(' ')
   expect(words(taskPieces(stateOf({}), NOW, 140))).toBe('● 7t70 working 2m · 46.8k tok')
-  expect(words(taskPieces(stateOf({ state: 'awaiting_approval', pending: ['r1'] }), NOW, 140))).toBe('● 7t70 waiting: /copilot approve r1')
+  expect(words(taskPieces(stateOf({ state: 'awaiting_approval', pending: ['r1'] }), NOW, 140))).toBe('● 7t70 waiting: answer r1')
+  expect(words(taskPieces(stateOf({ state: 'working', mode: 'bypass' }), NOW, 140))).toMatch(/^● 7t70 bypass working/)
   expect(words(taskPieces(stateOf({ state: 'completed' }), NOW, 140))).toBe('✓ 7t70 completed 5s ago · 46.8k tok')
   expect(words(taskPieces(stateOf({}), NOW, 60))).toBe('● 7t70 working 2m')
   // Green while working, orange while it waits on the person.

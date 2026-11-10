@@ -9,13 +9,13 @@ import { isDirty } from "../context/git.ts";
 import { secretsIn } from "../context/minimise.ts";
 import { taskId } from "../protocol/ids.ts";
 import { taskPaths, tasksDir } from "../protocol/layout.ts";
-import type { DecisionFile, TaskStateFile } from "../protocol/layout.ts";
+import type { DecisionFile, ModeFile, TaskStateFile } from "../protocol/layout.ts";
 import { parseQuota, QUOTA_ARGV, quotaLine } from "../protocol/quota.ts";
 import type { Quota } from "../protocol/quota.ts";
-import { makeEnvelope } from "../protocol/schema.ts";
-import type { Decision, TaskBody } from "../protocol/schema.ts";
+import { isMode, makeEnvelope, MODES } from "../protocol/schema.ts";
+import type { Decision, Mode, TaskBody } from "../protocol/schema.ts";
 import { DEFAULT_CAPS } from "../sidecar/budget.ts";
-import { HELP, isRunning, parseCopilot, pickTask, statusLine } from "./args.ts";
+import { HELP, isRunning, MODE_TEXT, parseCopilot, pickTask, statusLine } from "./args.ts";
 import { captureContext } from "./capture.ts";
 import type { Who } from "./capture.ts";
 import { isPerson } from "./engine.ts";
@@ -158,8 +158,8 @@ export async function startCopilot($: Engine, given: Host): Promise<void> {
   touched = [];
   await $.command.register({
     name: "copilot",
-    description: "Hands a task to GitHub Copilot CLI in its own git worktree. status shows tasks; approve, allow and deny answer its requests; stop ends one.",
-    argumentHint: "<task> | status | approve <request> | deny <request> | stop | setup",
+    description: "Hands a task to GitHub Copilot CLI in its own git worktree. --bypass/--auto set how much it asks; mode and models pick defaults; status shows tasks; stop ends one.",
+    argumentHint: "[--bypass|--auto|--model <id>] <task> | mode [ask|auto|bypass] | models | model <id> | status | stop | setup",
   });
   quota = null;
   quotaFailed = false;
@@ -203,7 +203,7 @@ async function nodeFault($: Engine): Promise<string> {
   return isEnough ? "" : `${need}; this computer has ${ran.stdout.trim()}.`;
 }
 
-async function handOver($: Engine, root: string, me: Who & { address: string }, task: string): Promise<string> {
+async function handOver($: Engine, root: string, me: Who & { address: string }, task: string, picked: { mode?: Mode; model?: string } = {}): Promise<string> {
   const secrets = secretsIn(task);
   if (secrets.length > 0) {
     return `Not sent: the task holds what looks like ${secrets.join(" and ")}. Take it out and try again.`;
@@ -221,7 +221,7 @@ async function handOver($: Engine, root: string, me: Who & { address: string }, 
   const paths = taskPaths(root, id);
   const envelope = makeEnvelope<TaskBody>({
     id: `${id}-task`, thread_id: id, from: me.address, fromId: me.id, ...(me.title ? { fromTitle: me.title } : {}), to: `copilot/${id}`,
-    sent_at: await $.clock.now(), kind: "task", body: { task_id: id, task }, text: `Task for Copilot: ${task}`,
+    sent_at: await $.clock.now(), kind: "task", body: { task_id: id, task, ...picked }, text: `Task for Copilot: ${task}`,
     context: context as unknown as Record<string, unknown>, caps: DEFAULT_CAPS,
   });
   await $.fs.write(paths.task, JSON.stringify(envelope, null, 2));
@@ -230,12 +230,12 @@ async function handOver($: Engine, root: string, me: Who & { address: string }, 
     return `Couldn't start the Copilot task${started?.stderr ? `: ${started.stderr.trim().slice(0, 300)}` : "."}`;
   }
   const dirty = context.git.dirty.staged + context.git.dirty.unstaged + context.git.dirty.untracked;
-  const lines = [
-    `Copilot task ${id} started, on branch copilot/${id} cut from ${context.git.branch || "this commit"} (${context.git.head_sha.slice(0, 12)}).`,
-    "Copilot asks before it writes, runs a command or uses the network; its requests show here for you to answer. The result arrives as a Crosstalk message. /copilot status shows how it stands.",
-  ];
+  const config = await readConfig($, root);
+  const mode = picked.mode ?? (isMode(config.mode) ? config.mode : "ask");
+  const model = picked.model ?? (typeof config.model === "string" && config.model !== "" ? config.model : "");
+  const lines = [`Copilot task ${id} started in ${mode} mode${model ? ` on ${model}` : ""}, on branch copilot/${id} from ${context.git.branch || context.git.head_sha.slice(0, 12)}. The result arrives as a Crosstalk message.`];
   if (isDirty(context.git)) {
-    lines.push(`Your uncommitted changes (${dirty} ${dirty === 1 ? "file" : "files"}) are not in its worktree, which is cut from the last commit.`);
+    lines.push(`Your uncommitted changes (${dirty} ${dirty === 1 ? "file" : "files"}) aren't in its worktree, which is cut from the last commit.`);
   }
   return lines.join("\n");
 }
@@ -285,6 +285,101 @@ async function runSetup($: Engine, root: string, origin: Origin): Promise<string
   return (ran.stdout.trim() || ran.stderr.trim().slice(0, 600) || (ran.exitCode === 0 ? "Copilot setup finished." : "Copilot setup failed."));
 }
 
+// The sidecar's settings file, which the mode and model commands write into, keeping the rest.
+const configPath = (root: string): string => `${root}/copilot/config.json`;
+
+async function readConfig($: Engine, root: string): Promise<Record<string, unknown>> {
+  const saved = await readJson($, configPath(root));
+  return typeof saved === "object" && saved !== null && !Array.isArray(saved) ? (saved as Record<string, unknown>) : {};
+}
+
+async function writeConfig($: Engine, root: string, change: Record<string, unknown>): Promise<void> {
+  await $.fs.write(configPath(root), JSON.stringify({ ...(await readConfig($, root)), ...change }, null, 2));
+}
+
+const MODE_LABEL: Record<Mode, string> = { ask: "Ask", auto: "Auto", bypass: "Bypass" };
+
+function modeList(current: Mode): string {
+  return [`Copilot mode now: ${current}.`, ...MODES.map((m) => `  ${m === current ? "●" : "○"} ${m}: ${MODE_TEXT[m]}`), "Change it: /copilot mode <mode> [task], or /copilot --<mode> <task> for one task."].join("\n");
+}
+
+// Sets the mode new tasks start in and switches this session's running tasks (or the one named).
+// Handing out approvals is the person's call, so only a command they typed does it.
+async function setMode($: Engine, root: string, sessionId: string, mode: Mode | "", named: string, origin: Origin): Promise<string> {
+  if (!isPerson(origin)) {
+    return "Only you can change Copilot's mode: type the command yourself.";
+  }
+  const saved = (await readConfig($, root)).mode;
+  const current: Mode = isMode(saved) ? saved : "ask";
+  let chosen = mode;
+  if (chosen === "") {
+    const answer = await $.ui.ask(`Which mode should Copilot tasks run in? Now: ${current}.`, {
+      header: "Copilot mode",
+      options: MODES.map((m) => MODE_LABEL[m]),
+    }).catch(() => "");
+    chosen = MODES.find((m) => MODE_LABEL[m] === answer || m === answer.trim().toLowerCase()) ?? "";
+    if (chosen === "") {
+      return modeList(current);
+    }
+  }
+  const states = await readStates($, root, sessionId);
+  const targets = named === "" ? states.filter(isRunning) : states.filter((s) => s.task_id === named);
+  if (named !== "" && targets.length === 0) {
+    return `This session has no task ${named}. /copilot status shows them.`;
+  }
+  const now = await $.clock.now();
+  for (const state of targets.filter(isRunning)) {
+    const file: ModeFile = { mode: chosen, at: now };
+    await $.fs.write(taskPaths(root, state.task_id).mode, JSON.stringify(file));
+  }
+  if (named === "") {
+    await writeConfig($, root, { mode: chosen });
+  }
+  const switched = targets.filter(isRunning).map((s) => s.task_id);
+  const scope = named === "" ? "New tasks start in it" : `Set for ${named} only`;
+  const running = switched.length > 0 && named === "" ? `; switched ${switched.length === 1 ? "the running task" : `${switched.length} running tasks`} too` : "";
+  void tick($).catch(() => {});
+  return `Copilot mode: ${chosen}, ${MODE_TEXT[chosen]}. ${scope}${running}.`;
+}
+
+type ModelsAnswer = { ok: true; models: { id: string; name: string; multiplier: number | null; enabled: boolean }[]; default: string } | { ok: false; error: string };
+
+async function readModels($: Engine, root: string): Promise<ModelsAnswer> {
+  const ran = await $.process.run(["node", `${$.plugin.root}/copilot/sidecar/main.ts`, "models", "--root", root], { timeoutMs: 60_000 }).catch(() => null);
+  try {
+    return JSON.parse(ran?.stdout.trim() ?? "") as ModelsAnswer;
+  } catch {
+    return { ok: false, error: ran?.stderr.trim().slice(0, 300) || "the model list could not be read" };
+  }
+}
+
+async function listModels($: Engine, root: string): Promise<string> {
+  const read = await readModels($, root);
+  if (!read.ok) {
+    return `Couldn't list Copilot's models: ${read.error}.`;
+  }
+  const width = Math.max(...read.models.map((m) => m.id.length));
+  const rows = read.models.map((m) => {
+    const price = m.multiplier === null ? "" : `  ${m.multiplier}x`;
+    const mark = m.id === read.default ? "  ← default" : "";
+    return `  ${m.id.padEnd(width)}  ${m.name}${price}${m.enabled ? "" : "  (turned off for this account)"}${mark}`;
+  });
+  const now = read.default === "" ? "New tasks use Copilot's own default." : `New tasks use ${read.default}.`;
+  return [`Copilot models (${read.models.length}). ${now}`, ...rows, "Pick one: /copilot model <id>, or /copilot --model <id> <task> for one task."].join("\n");
+}
+
+async function setModel($: Engine, root: string, model: string, origin: Origin): Promise<string> {
+  if (!isPerson(origin)) {
+    return "Only you can change Copilot's model: type the command yourself.";
+  }
+  const read = await readModels($, root);
+  if (read.ok && model !== "default" && !read.models.some((m) => m.id === model)) {
+    return `Copilot has no model ${model}. /copilot models lists them.`;
+  }
+  await writeConfig($, root, { model: model === "default" ? "" : model });
+  return model === "default" ? "New Copilot tasks use Copilot's own default model." : `New Copilot tasks use ${model}.`;
+}
+
 async function copilotCommand($: Engine, args: string, origin: Origin): Promise<string> {
   const me = host?.who() ?? null;
   if (!host || !me) {
@@ -313,7 +408,18 @@ async function copilotCommand($: Engine, args: string, origin: Origin): Promise<
       return decide($, host.root, me.id, command.decision, command.requestId, command.taskId, origin);
     case "stop":
       return stop($, host.root, me.id, command.taskId);
+    case "mode":
+      return setMode($, host.root, me.id, command.mode, command.taskId, origin);
+    case "models":
+      return listModels($, host.root);
+    case "model":
+      return setModel($, host.root, command.model, origin);
+    case "error":
+      return command.text;
     case "task":
-      return handOver($, host.root, me, command.task);
+      if ((command.mode || command.model) && !isPerson(origin)) {
+        return "Only you can pick a Copilot task's mode or model: type the command yourself.";
+      }
+      return handOver($, host.root, me, command.task, { ...(command.mode ? { mode: command.mode } : {}), ...(command.model ? { model: command.model } : {}) });
   }
 }
