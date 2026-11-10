@@ -57,9 +57,11 @@ test('the copilot ring is skins\' ring in purple: fills in when it changes, sett
   expect(ringLine(11, 'copilot')).toEqual({ bar: '█░░░░░░░', text: '11% copilot', color: '#bd93f9' })
   expect(ringLine(50, 'copilot').bar).toBe('████░░░░')
   // Short words, to save room on the row, with the day the allowance starts again.
-  expect(ringLabel(QUOTA)).toBe('gh · reset 1 Dec')
-  expect(ringLabel({ ...QUOTA, resetDate: '' })).toBe('gh')
-  expect(ringSvg(11, ringLabel(QUOTA), false).source).toMatch(/> gh · reset 1 Dec</)
+  expect(ringLabel(QUOTA)).toBe('gh · default · reset 1 Dec')
+  expect(ringLabel(QUOTA, 'gpt-5')).toBe('gh · gpt-5 · reset 1 Dec')
+  expect(ringLabel({ ...QUOTA, resetDate: '' }, 'gpt-5')).toBe('gh · gpt-5')
+  expect(ringLabel({ ...QUOTA, resetDate: '' })).toBe('gh · default')
+  expect(ringSvg(11, ringLabel(QUOTA, 'gpt-5'), false).source).toMatch(/> gh · gpt-5 · reset 1 Dec</)
   // Skins' terminal bars are redrawn in the same blocks; other text is left alone.
   const skins = { type: 'Text', props: { color: 'grey' }, children: [{ type: 'Text', props: { color: 'blue' }, children: ['▰▰▰▱▱▱▱▱'] }, ' 39% 7d'] }
   const redrawn: any = blockBars(skins)

@@ -376,6 +376,18 @@ test('the copilot ring joins the skins meters, after them, with no label in fron
   expect(await terminal.find({ type: 'Text', text: '█░░░░░░░' })).toBeDefined()
   expect(await terminal.find({ type: 'Text', text: '███░░░░░' })).toBeDefined()
   expect(await terminal.find({ type: 'Text', text: '▰▰▰▱▱▱▱▱' })).toBeUndefined()
-  expect(await terminal.find({ type: 'Text', text: ' 11% gh · reset 1 Dec' })).toBeDefined()
+  expect(await terminal.find({ type: 'Text', text: ' 11% gh · default · reset 1 Dec' })).toBeDefined()
+  await terminal.unmount()
+})
+
+test('the copilot ring names the model new tasks use, from config.json', async ($, on) => {
+  const { files } = computer(on)
+  files.gh = QUOTA_ANSWER
+  files.set(`${BOX}/copilot/config.json`, JSON.stringify({ model: 'gpt-5' }))
+  on('ui.render', () => skinsBand())
+  await $.session.start(START)
+  await settle()
+  const terminal = await mountBand($, 'terminal')
+  expect(await terminal.find({ type: 'Text', text: ' 11% gh · gpt-5 · reset 1 Dec' })).toBeDefined()
   await terminal.unmount()
 })
