@@ -1,4 +1,4 @@
-// Pictures pasted with /copilot: decoded into the task's worktree, kept out of its branch, and
+// Pictures pasted with /crosstalk-gh: decoded into the task's worktree, kept out of its branch, and
 // refused in a handoff when a name could leave the attachments folder.
 
 import assert from "node:assert/strict";

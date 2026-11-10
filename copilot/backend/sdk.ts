@@ -1,7 +1,7 @@
 // A Copilot backend over the official GitHub Copilot SDK (@github/copilot-sdk), which runs its own
 // bundled Copilot runtime and talks to it over JSON-RPC.
 //
-// The SDK is not a dependency of this plugin. `/copilot setup` installs a pinned version into
+// The SDK is not a dependency of this plugin. `/crosstalk-gh setup` installs a pinned version into
 // Crosstalk's own folder, and it is loaded from there by path. Only the few members used here are
 // described, as the shapes this file relies on; the SDK's own declarations are the authority.
 //
@@ -20,7 +20,7 @@ import type { ToolEvent } from "./sdk-map.ts";
 export const SDK_PACKAGE = "@github/copilot-sdk";
 export const SDK_VERSION = "1.0.30";
 
-// Where `/copilot setup` puts the SDK, under Crosstalk's folder.
+// Where `/crosstalk-gh setup` puts the SDK, under Crosstalk's folder.
 export const sdkFolder = (root: string): string => `${root.replace(/\\/g, "/").replace(/\/+$/, "")}/copilot/runtime`;
 export const sdkEntry = (root: string): string => `${sdkFolder(root)}/node_modules/${SDK_PACKAGE}/dist/index.js`;
 
@@ -59,14 +59,14 @@ export type SdkModel = { id: string; name: string; policy?: { state: string }; b
 // Throws when the SDK is not installed or the client cannot start.
 export async function listSdkModels(entry: string, env: Record<string, string>, cwd: string): Promise<SdkModel[]> {
   if (!existsSync(entry)) {
-    throw new BackendGone("the Copilot SDK is not installed: run /copilot setup");
+    throw new BackendGone("the Copilot SDK is not installed: run /crosstalk-gh setup");
   }
   const sdk = (await import(pathToFileURL(entry).href)) as SdkModule;
   const client = new sdk.CopilotClient({ workingDirectory: cwd, env, useLoggedInUser: true, logLevel: "error" });
   try {
     await client.start();
     if (typeof client.listModels !== "function") {
-      throw new Error("this version of the Copilot SDK cannot list models; run /copilot setup to update it");
+      throw new Error("this version of the Copilot SDK cannot list models; run /crosstalk-gh setup to update it");
     }
     return await client.listModels();
   } finally {
@@ -106,7 +106,7 @@ export class SdkBackend implements CopilotBackend {
 
   async start(options: StartOptions): Promise<BackendInfo> {
     if (!existsSync(this.entry)) {
-      throw new BackendGone("the Copilot SDK is not installed: run /copilot setup");
+      throw new BackendGone("the Copilot SDK is not installed: run /crosstalk-gh setup");
     }
     const sdk = (await import(pathToFileURL(this.entry).href)) as SdkModule;
     const client = new sdk.CopilotClient({ workingDirectory: options.cwd, env: options.env, useLoggedInUser: true, logLevel: "error" });

@@ -52,7 +52,7 @@ export const tasksDir = (root: string): string => `${tidy(root)}/copilot/tasks`;
 export const auditFile = (root: string, day: string): string => `${tidy(root)}/copilot/audit/${day}.jsonl`;
 export const eventName = (seq: number): string => `${String(seq).padStart(8, "0")}.json`;
 
-// What state.json holds: enough for /copilot status and the status line, with no reading of events.
+// What state.json holds: enough for /crosstalk-gh status and the status line, with no reading of events.
 export type TaskStateFile = {
   task_id: string;
   state: TaskState;

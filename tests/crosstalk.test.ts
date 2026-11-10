@@ -877,6 +877,17 @@ test('a desktop-app session goes by its app title, read from its own app copy, a
   expect(JSON.parse(files.get(written)!)).toMatchObject({ from: 'work/claude-fuuk-for-next-task-self', fromTitle: 'Claude Fuuk for next task' })
 })
 
+test('Claude runs any /crosstalk command through the crosstalk tool', async ($, on) => {
+  const files = fakeDisk(on)
+  await $.session.start(START)
+  files.set(`${BOX}/sessions/other.json`, JSON.stringify({ id: 'other', profile: 'personal', address: 'personal/x-oth', cwd: 'y', seenAt: NOW }))
+  const run = async (args: string) => JSON.stringify(await $.tool.call({ tool: 'mcp__crosstalk__crosstalk', args } as never))
+  expect(await run('')).toMatch(/Others running: personal\/x-oth/)
+  expect(await run('help')).toMatch(/\/crosstalk/)
+  expect(await run('to personal hi')).toMatch(/Sent to personal\/x-oth/)
+  expect([...files.keys()].some((k) => k.startsWith(`${BOX}/inbox/other/`))).toBe(true)
+})
+
 test('without the account variables the app file is looked for in each account folder', async ($, on) => {
   const { CLAUDE_CODE_ACCOUNT_UUID: _a, CLAUDE_CODE_ORGANIZATION_UUID: _o, ...env } = APP_ENV
   const files = fakeDisk(on, env)

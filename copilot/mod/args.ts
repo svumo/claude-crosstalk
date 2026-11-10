@@ -1,4 +1,4 @@
-// What the person typed after /copilot, and the lines the command answers with. Pure.
+// What the person typed after /crosstalk-gh, and the lines the command answers with. Pure.
 
 import { isTaskId } from "../protocol/ids.ts";
 import { REQUEST_ID } from "../protocol/layout.ts";
@@ -50,12 +50,12 @@ function taskFlags(text: string): { mode?: Mode; model?: string; rest: string } 
     const value = match[2] ?? "";
     if (flag === "mode") {
       if (!isMode(value.toLowerCase())) {
-        return { error: `"${value}" isn't a Copilot mode. Choices: ${MODES.join(", ")}. /copilot mode lists them.` };
+        return { error: `"${value}" isn't a Copilot mode. Choices: ${MODES.join(", ")}. /crosstalk-gh mode lists them.` };
       }
       found.mode = value.toLowerCase() as Mode;
     } else {
       if (!MODEL_ID.test(value)) {
-        return { error: `"${value}" isn't a model id. /copilot models lists them.` };
+        return { error: `"${value}" isn't a model id. /crosstalk-gh models lists them.` };
       }
       found.model = value;
     }
@@ -64,7 +64,7 @@ function taskFlags(text: string): { mode?: Mode; model?: string; rest: string } 
 }
 
 // A word is a command only in its exact shape; anything else is a task in the person's own words,
-// so "/copilot stop the flaky test" hands over a task and "/copilot stop" stops one.
+// so "/crosstalk-gh stop the flaky test" hands over a task and "/crosstalk-gh stop" stops one.
 export function parseCopilot(args: string): CopilotCommand {
   const text = args.trim();
   if (text.startsWith("--")) {
@@ -73,7 +73,7 @@ export function parseCopilot(args: string): CopilotCommand {
       return { verb: "error", text: flags.error };
     }
     if (flags.rest.trim() === "") {
-      return { verb: "error", text: "Say what the task is after the flags, such as /copilot --bypass add a README." };
+      return { verb: "error", text: "Say what the task is after the flags, such as /crosstalk-gh --bypass add a README." };
     }
     return { verb: "task", task: flags.rest.trim(), ...(flags.mode ? { mode: flags.mode } : {}), ...(flags.model ? { model: flags.model } : {}) };
   }
@@ -113,14 +113,14 @@ export function parseCopilot(args: string): CopilotCommand {
 }
 
 export const HELP = [
-  "/copilot <task> hands the task to GitHub Copilot CLI in its own git worktree and branch. The result comes back here as a Crosstalk message.",
-  "/copilot --bypass <task> (or --auto, --mode <mode>, --model <id>) starts it in that mode or on that model.",
-  "/copilot mode picks the mode new tasks start in; /copilot mode bypass [task] also switches this session's running tasks.",
-  "/copilot models lists the models; /copilot model <id> picks the one new tasks use.",
-  "/copilot status shows this session's tasks and any request waiting for you.",
-  "Copilot's requests pop up for you to answer. /copilot approve <request>, /copilot allow <request> (for the rest of the task) and /copilot deny <request> answer them too. Only you can.",
-  "/copilot stop [task] stops a task.",
-  "/copilot setup installs the Copilot SDK that tasks run on, and checks who Copilot is signed in as. Without it, tasks run on Copilot CLI over ACP.",
+  "/crosstalk-gh <task> hands the task to GitHub Copilot CLI in its own git worktree and branch. The result comes back here as a Crosstalk message.",
+  "/crosstalk-gh --bypass <task> (or --auto, --mode <mode>, --model <id>) starts it in that mode or on that model.",
+  "/crosstalk-gh mode picks the mode new tasks start in; /crosstalk-gh mode bypass [task] also switches this session's running tasks.",
+  "/crosstalk-gh models lists the models; /crosstalk-gh model <id> picks the one new tasks use.",
+  "/crosstalk-gh status shows this session's tasks and any request waiting for you.",
+  "Copilot's requests pop up for you to answer. /crosstalk-gh approve <request>, /crosstalk-gh allow <request> (for the rest of the task) and /crosstalk-gh deny <request> answer them too. Only you can.",
+  "/crosstalk-gh stop [task] stops a task.",
+  "/crosstalk-gh setup installs the Copilot SDK that tasks run on, and checks who Copilot is signed in as. Without it, tasks run on Copilot CLI over ACP.",
 ].join("\n");
 
 const age = (ms: number): string => {
@@ -130,9 +130,9 @@ const age = (ms: number): string => {
 
 export const isRunning = (state: TaskStateFile): boolean => !FINAL_STATES.includes(state.state);
 
-// One task as /copilot status shows it.
+// One task as /crosstalk-gh status shows it.
 export function statusLine(state: TaskStateFile, now: number): string {
-  const waiting = state.pending.length > 0 ? ` Waiting for you: ${state.pending.map((id) => `/copilot approve ${id}`).join(", ")}.` : "";
+  const waiting = state.pending.length > 0 ? ` Waiting for you: ${state.pending.map((id) => `/crosstalk-gh approve ${id}`).join(", ")}.` : "";
   const detail = state.detail && state.state !== "awaiting_approval" ? ` ${state.detail}` : "";
   const mode = state.mode && state.mode !== "ask" ? ` (${state.mode})` : "";
   return `${state.task_id}${mode}: ${state.state.replace("_", " ")}, started ${age(now - state.started_at)} ago, ${usageLine(state.usage)}.${detail}${waiting}`;
@@ -145,7 +145,7 @@ export function pickTask(states: TaskStateFile[], taskId: string, fits: (state: 
     return { state: named[0] };
   }
   if (named.length === 0) {
-    return { error: taskId === "" ? `No task of this session ${what}. /copilot status shows them.` : `This session has no task ${taskId}. /copilot status shows them.` };
+    return { error: taskId === "" ? `No task of this session ${what}. /crosstalk-gh status shows them.` : `This session has no task ${taskId}. /crosstalk-gh status shows them.` };
   }
   return { error: `More than one task ${what}: ${named.map((s) => s.task_id).join(", ")}. Add the task's name at the end.` };
 }

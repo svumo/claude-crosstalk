@@ -1,4 +1,4 @@
-// The Copilot part of Crosstalk's hooks module: the /copilot command and what follows from it.
+// The Copilot part of Crosstalk's hooks module: the /crosstalk-gh command and what follows from it.
 //
 // hooks.json names a single module, and the engine takes one unmatched hook per event across that
 // module and everything it imports. So hooks/crosstalk.mjs keeps the session's own hooks and calls
@@ -18,13 +18,17 @@ import { DEFAULT_CAPS } from "../sidecar/budget.ts";
 import { HELP, isRunning, MODE_TEXT, parseCopilot, pickTask, statusLine } from "./args.ts";
 import { captureContext } from "./capture.ts";
 import type { Who } from "./capture.ts";
-import { isPerson } from "./engine.ts";
+import { CLAUDE_TOOL, mayControl } from "./engine.ts";
 import type { Engine, On, Origin, SubmitInput } from "./engine.ts";
 import { blockBars, COPILOT_ROW_KEY, intoBand, isLive, PALETTE, pickShown, ringLabel, ringLine, ringPercent, ringSvg, taskPieces, UNAVAILABLE } from "./meter.ts";
 import type { Piece } from "./meter.ts";
 
 // What Crosstalk hands over at session start: its shared folder, and this session as it is now.
 export type Host = { root: string; who: () => (Who & { address: string }) | null };
+
+// The slash command, and the tool that lets Claude run the same command line.
+export const COMMAND = "crosstalk-gh";
+export const GH_TOOL = "mcp__crosstalk__crosstalk_gh";
 
 const NODE_NEEDED = [22, 18] as const;
 const SHOWN_TASKS = 10;
@@ -82,7 +86,9 @@ function noteEdit(path: unknown): void {
 }
 
 export function registerCopilot(on: On): void {
-  on("command.run", { command: "copilot" }, async ($, e) => ({ text: await copilotCommand($, String(e.args ?? ""), e.origin) }));
+  on("command.run", { command: COMMAND }, async ($, e) => ({ text: await copilotCommand($, String(e.args ?? ""), e.origin) }));
+
+  on("tool.call", { tool: GH_TOOL }, async ($, e) => ({ result: await copilotCommand($, String(e.args ?? ""), CLAUDE_TOOL) }));
 
   on("tool.call", { tool: "Edit" }, async (_$, e, next) => {
     noteEdit(e.file_path);
@@ -157,9 +163,15 @@ export async function startCopilot($: Engine, given: Host): Promise<void> {
   host = given;
   touched = [];
   await $.command.register({
-    name: "copilot",
+    name: COMMAND,
     description: "Hands a task to GitHub Copilot CLI in its own git worktree. --bypass/--auto set how much it asks; mode and models pick defaults; status shows tasks; stop ends one.",
     argumentHint: "[--bypass|--auto|--model <id>] <task> | mode [ask|auto|bypass] | models | model <id> | status | stop | setup",
+  });
+  await $.tool.register({
+    name: "crosstalk_gh",
+    description: "Run a /crosstalk-gh command, which drives GitHub Copilot CLI. `args` is everything after /crosstalk-gh: a task to hand Copilot (it runs in its own git worktree and branch cut from this session's branch, and the result comes back as a Crosstalk message), optionally led by --bypass, --auto, --mode <mode> or --model <id>; or one of: status, stop [task], mode <ask|auto|bypass> [task], models, model <id|default>, approve|allow|deny <request> [task], setup, help.",
+    inputSchema: { type: "object", properties: { args: { type: "string", description: "Everything after /crosstalk-gh, e.g. \"status\" or \"--bypass fix the login bug\"" } }, required: ["args"] },
+    isDeferred: false,
   });
   quota = null;
   quotaFailed = false;
@@ -245,7 +257,7 @@ async function handOver($: Engine, root: string, me: Who & { address: string }, 
   return lines.join("\n");
 }
 
-// A /copilot task waiting for the prompt.submit that follows its command, where pasted pictures
+// A /crosstalk-gh task waiting for the prompt.submit that follows its command, where pasted pictures
 // can be read. IMAGE_WAIT_MS is long enough for that event, short enough not to be noticed (build choice).
 const IMAGE_WAIT_MS = 2_500;
 const IMAGES_MAX = 10;
@@ -316,10 +328,10 @@ async function savePictures($: Engine, dir: string, attachments: SubmitInput["at
   return names;
 }
 
-// Called from Crosstalk's prompt.submit hook: the /copilot line's own submission carries what was
+// Called from Crosstalk's prompt.submit hook: the /crosstalk-gh line's own submission carries what was
 // pasted with it. Media can only be read while that hook runs, so this waits for the reads.
 export async function copilotSubmit($: Engine, e: SubmitInput): Promise<void> {
-  if (!held || e.command?.name !== "copilot") {
+  if (!held || e.command?.name !== COMMAND) {
     return;
   }
   const task = held;
@@ -332,7 +344,7 @@ export async function copilotSubmit($: Engine, e: SubmitInput): Promise<void> {
 }
 
 async function decide($: Engine, root: string, sessionId: string, decision: Decision, requestId: string, named: string, origin: Origin): Promise<string> {
-  if (!isPerson(origin)) {
+  if (!mayControl(origin)) {
     return "Only you can answer Copilot's requests: type the command yourself.";
   }
   const picked = pickTask(await readStates($, root, sessionId), named, (s) => s.pending.includes(requestId), `is waiting on ${requestId}`);
@@ -340,7 +352,7 @@ async function decide($: Engine, root: string, sessionId: string, decision: Deci
     return picked.error ?? "";
   }
   if (!picked.state.pending.includes(requestId)) {
-    return `${picked.state.task_id} is not waiting on ${requestId}. /copilot status shows what it is waiting on.`;
+    return `${picked.state.task_id} is not waiting on ${requestId}. /crosstalk-gh status shows what it is waiting on.`;
   }
   const answer: DecisionFile = { request_id: requestId, decision, decided_by: "command", at: await $.clock.now() };
   await $.fs.write(`${taskPaths(root, picked.state.task_id).decisions}/${requestId}.json`, JSON.stringify(answer));
@@ -362,8 +374,8 @@ async function stop($: Engine, root: string, sessionId: string, named: string): 
 
 // Installing software is the person's call, so only a command they typed runs it (build choice).
 async function runSetup($: Engine, root: string, origin: Origin): Promise<string> {
-  if (!isPerson(origin)) {
-    return "Only you can run /copilot setup: type the command yourself.";
+  if (!mayControl(origin)) {
+    return "Only you can run /crosstalk-gh setup: type the command yourself.";
   }
   const fault = await nodeFault($);
   if (fault !== "") {
@@ -391,13 +403,13 @@ async function writeConfig($: Engine, root: string, change: Record<string, unkno
 const MODE_LABEL: Record<Mode, string> = { ask: "Ask", auto: "Auto", bypass: "Bypass" };
 
 function modeList(current: Mode): string {
-  return [`Copilot mode now: ${current}.`, ...MODES.map((m) => `  ${m === current ? "●" : "○"} ${m}: ${MODE_TEXT[m]}`), "Change it: /copilot mode <mode> [task], or /copilot --<mode> <task> for one task."].join("\n");
+  return [`Copilot mode now: ${current}.`, ...MODES.map((m) => `  ${m === current ? "●" : "○"} ${m}: ${MODE_TEXT[m]}`), "Change it: /crosstalk-gh mode <mode> [task], or /crosstalk-gh --<mode> <task> for one task."].join("\n");
 }
 
 // Sets the mode new tasks start in and switches this session's running tasks (or the one named).
 // Handing out approvals is the person's call, so only a command they typed does it.
 async function setMode($: Engine, root: string, sessionId: string, mode: Mode | "", named: string, origin: Origin): Promise<string> {
-  if (!isPerson(origin)) {
+  if (!mayControl(origin)) {
     return "Only you can change Copilot's mode: type the command yourself.";
   }
   const saved = (await readConfig($, root)).mode;
@@ -416,7 +428,7 @@ async function setMode($: Engine, root: string, sessionId: string, mode: Mode | 
   const states = await readStates($, root, sessionId);
   const targets = named === "" ? states.filter(isRunning) : states.filter((s) => s.task_id === named);
   if (named !== "" && targets.length === 0) {
-    return `This session has no task ${named}. /copilot status shows them.`;
+    return `This session has no task ${named}. /crosstalk-gh status shows them.`;
   }
   const now = await $.clock.now();
   for (const state of targets.filter(isRunning)) {
@@ -456,16 +468,16 @@ async function listModels($: Engine, root: string): Promise<string> {
     return `  ${m.id.padEnd(width)}  ${m.name}${price}${m.enabled ? "" : "  (turned off for this account)"}${mark}`;
   });
   const now = read.default === "" ? "New tasks use Copilot's own default." : `New tasks use ${read.default}.`;
-  return [`Copilot models (${read.models.length}). ${now}`, ...rows, "Pick one: /copilot model <id>, or /copilot --model <id> <task> for one task."].join("\n");
+  return [`Copilot models (${read.models.length}). ${now}`, ...rows, "Pick one: /crosstalk-gh model <id>, or /crosstalk-gh --model <id> <task> for one task."].join("\n");
 }
 
 async function setModel($: Engine, root: string, model: string, origin: Origin): Promise<string> {
-  if (!isPerson(origin)) {
+  if (!mayControl(origin)) {
     return "Only you can change Copilot's model: type the command yourself.";
   }
   const read = await readModels($, root);
   if (read.ok && model !== "default" && !read.models.some((m) => m.id === model)) {
-    return `Copilot has no model ${model}. /copilot models lists them.`;
+    return `Copilot has no model ${model}. /crosstalk-gh models lists them.`;
   }
   await writeConfig($, root, { model: model === "default" ? "" : model });
   return model === "default" ? "New Copilot tasks use Copilot's own default model." : `New Copilot tasks use ${model}.`;
@@ -490,7 +502,7 @@ async function copilotCommand($: Engine, args: string, origin: Origin): Promise<
         quotaFailed = false;
       }
       const meter = fresh ? quotaLine(fresh) : "GitHub's Copilot meter could not be read (gh api copilot_internal/user failed; is gh signed in?).";
-      const tasks = states.length === 0 ? "This session has handed Copilot no tasks. /copilot <task> starts one." : states.slice(0, SHOWN_TASKS).map((s) => statusLine(s, now)).join("\n");
+      const tasks = states.length === 0 ? "This session has handed Copilot no tasks. /crosstalk-gh <task> starts one." : states.slice(0, SHOWN_TASKS).map((s) => statusLine(s, now)).join("\n");
       return `${tasks}\n${meter}`;
     }
     case "setup":
@@ -508,7 +520,7 @@ async function copilotCommand($: Engine, args: string, origin: Origin): Promise<
     case "error":
       return command.text;
     case "task":
-      if ((command.mode || command.model) && !isPerson(origin)) {
+      if ((command.mode || command.model) && !mayControl(origin)) {
         return "Only you can pick a Copilot task's mode or model: type the command yourself.";
       }
       return handOver($, host.root, me, command.task, { ...(command.mode ? { mode: command.mode } : {}), ...(command.model ? { model: command.model } : {}) });

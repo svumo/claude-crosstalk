@@ -2,7 +2,7 @@
 // grant they gave earlier in this task covers it, or the wait runs out, which denies it.
 //
 // An answer is a file in the task's decisions folder, written by the person's own act: a key in
-// the attach terminal, a /copilot command they typed, or a button they pressed. Nothing a model
+// the attach terminal, a /crosstalk-gh command they typed, or a button they pressed. Nothing a model
 // can call writes one.
 
 import type { PermissionAnswer, PermissionAsk } from "../backend/adapter.ts";

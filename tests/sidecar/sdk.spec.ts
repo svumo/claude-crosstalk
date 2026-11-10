@@ -167,8 +167,8 @@ test("start refuses when Copilot is not signed in, or is signed in as another ac
   assert.equal((await new SdkBackend(ENTRY, " OctoCat ").start({ cwd: folder(), env: {} })).account, "octocat");
 });
 
-test("with no SDK installed, start says to run /copilot setup", async () => {
-  await assert.rejects(new SdkBackend(join(folder(), "missing.js")).start({ cwd: folder(), env: {} }), (error: unknown) => error instanceof BackendGone && /\/copilot setup/.test(error.message));
+test("with no SDK installed, start says to run /crosstalk-gh setup", async () => {
+  await assert.rejects(new SdkBackend(join(folder(), "missing.js")).start({ cwd: folder(), env: {} }), (error: unknown) => error instanceof BackendGone && /\/crosstalk-gh setup/.test(error.message));
 });
 
 test("a shell request carries the whole command; unknown kinds are 'other'", () => {

@@ -6,7 +6,7 @@ import { readJson } from "./files.ts";
 import { DEFAULT_CONFIG } from "./task.ts";
 import type { TaskConfig } from "./task.ts";
 
-// `backend`: "sdk", "acp", or "auto" (the SDK when `/copilot setup` has installed it, else ACP).
+// `backend`: "sdk", "acp", or "auto" (the SDK when `/crosstalk-gh setup` has installed it, else ACP).
 // `backendCommand` names another ACP agent's command line, and implies ACP.
 // `account`: the only GitHub login Copilot may be signed in as (checked on the SDK backend).
 export type Settings = TaskConfig & { backend: "auto" | "sdk" | "acp"; backendCommand: string[]; account: string };

@@ -82,7 +82,7 @@ export function permissionText(body: PermissionRequestBody): string {
   const lines = [
     `Copilot task ${body.task_id} asks to ${WHAT[body.tool_kind]}${scope ? ` ${scope}` : ""} (${body.risk} risk):`,
     `  ${permissionTarget(body)}`,
-    `Only you can answer: /copilot approve ${body.request_id}${body.task_grant ? `, /copilot allow ${body.request_id} (${body.task_grant}, for this task)` : ""} or /copilot deny ${body.request_id}.`,
+    `Only you can answer: /crosstalk-gh approve ${body.request_id}${body.task_grant ? `, /crosstalk-gh allow ${body.request_id} (${body.task_grant}, for this task)` : ""} or /crosstalk-gh deny ${body.request_id}.`,
   ];
   return lines.join("\n");
 }

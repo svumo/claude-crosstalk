@@ -13,7 +13,7 @@ const START = { cwd: 'C:\\code\\proj', surface: 'terminal', isInteractive: true 
 const RAN_OK = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
 const slash = (path: string) => path.replace(/\\/g, '/')
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30))
-const say = async ($: any, args: string, origin: any = { kind: 'composer' }) => (await $.command.run({ command: 'copilot', args, origin })).text as string
+const say = async ($: any, args: string, origin: any = { kind: 'composer' }) => (await $.command.run({ command: 'crosstalk-gh', args, origin })).text as string
 // Runs out the wait a task holds for pasted pictures, then lets its start finish.
 const wake = async (files: any) => {
   for (const fire of files.waits.splice(0)) fire()
@@ -80,7 +80,7 @@ function computer(on: any, git: Record<string, string> = {}, node = 'v22.18.0') 
   on('clock.every', (_: any, e: any) => new Promise<any>((resolve) => {
     if (e.ms === 3000) files.tick = () => resolve({ value: undefined })
   }))
-  // The wait a /copilot task holds for its pasted pictures: fired by the test with `wake()`.
+  // The wait a /crosstalk-gh task holds for its pasted pictures: fired by the test with `wake()`.
   files.waits = [] as (() => void)[]
   on('clock.after', (_: any, e: any) => new Promise<any>((resolve) => {
     if (e.ms === 2500) files.waits.push(() => resolve({ value: undefined }))
@@ -96,7 +96,7 @@ const stateOf = (over: Partial<TaskStateFile>): TaskStateFile => ({
 })
 const putState = (files: any, state: TaskStateFile) => files.set(`${BOX}/copilot/tasks/${state.task_id}/state.json`, JSON.stringify(state))
 
-test('what follows /copilot is a command only in its exact shape, else a task in the person\'s words', async () => {
+test('what follows /crosstalk-gh is a command only in its exact shape, else a task in the person\'s words', async () => {
   expect(parseCopilot('')).toEqual({ verb: 'help' })
   expect(parseCopilot('status')).toEqual({ verb: 'status' })
   expect(parseCopilot('setup')).toEqual({ verb: 'setup' })
@@ -126,14 +126,14 @@ test('what follows /copilot is a command only in its exact shape, else a task in
 })
 
 test('a status line says how a task stands and what waits on the person', async () => {
-  expect(statusLine(stateOf({}), NOW)).toBe('fix-login-x9q2: awaiting approval, started 2 min ago, 1 prompt, 0.0 AI credits (0 in, 0 cached, 0 out). Waiting for you: /copilot approve r1.')
+  expect(statusLine(stateOf({}), NOW)).toBe('fix-login-x9q2: awaiting approval, started 2 min ago, 1 prompt, 0.0 AI credits (0 in, 0 cached, 0 out). Waiting for you: /crosstalk-gh approve r1.')
   const two = [stateOf({}), stateOf({ task_id: 'other-aaaa' })]
   expect(pickTask(two, '', (s) => s.pending.includes('r1'), 'is waiting on r1').error).toMatch(/More than one task is waiting on r1: fix-login-x9q2, other-aaaa/)
   expect(pickTask(two, 'other-aaaa', () => true, 'x').state?.task_id).toBe('other-aaaa')
   expect(pickTask(two, '', () => false, 'is running').error).toMatch(/No task of this session is running/)
 })
 
-test('/copilot <task> captures the session, writes the handoff and starts the sidecar', async ($, on) => {
+test('/crosstalk-gh <task> captures the session, writes the handoff and starts the sidecar', async ($, on) => {
   const { files, calls } = computer(on)
   await $.session.start(START)
   await $.tool.call({ tool: 'Edit', file_path: 'C:\\code\\proj\\src\\login.ts', old_string: 'a', new_string: 'b' } as never).catch(() => {})
@@ -161,9 +161,9 @@ test('/copilot <task> captures the session, writes the handoff and starts the si
   expect(text).toMatch(/Your uncommitted changes \(1 file\) aren't in its worktree/)
 })
 
-// The kit can't raise the /copilot line's own submission (it leaves out `command`), so pictures
+// The kit can't raise the /crosstalk-gh line's own submission (it leaves out `command`), so pictures
 // arriving through it are checked live; here, the waits around it.
-test('a /copilot task waits for its pictures, a prompt that is not its own submission does not start it, and a second task never waits on the first', async ($, on) => {
+test('a /crosstalk-gh task waits for its pictures, a prompt that is not its own submission does not start it, and a second task never waits on the first', async ($, on) => {
   const { files, calls } = computer(on)
   await $.session.start(START)
   const starts = () => calls.filter((a) => a[0] === 'node' && a[2] === 'start').map((a) => a[3])
@@ -226,9 +226,21 @@ test('only the person answers a request, and the answer is a decision file for t
   expect(await say($, 'allow r1')).toBe('Allowed for the rest of the task: r1 of fix-login-x9q2.')
   expect(JSON.parse(files.get(decision))).toEqual({ request_id: 'r1', decision: 'allow_task', decided_by: 'command', at: NOW })
   const status = (await say($, 'status')).split('\n')
-  expect(status[0]).toMatch(/^fix-login-x9q2: awaiting approval.*Waiting for you: \/copilot approve r1\.$/)
+  expect(status[0]).toMatch(/^fix-login-x9q2: awaiting approval.*Waiting for you: \/crosstalk-gh approve r1\.$/)
   // gh answers nothing on this pretend computer, so the meter line says it couldn't be read.
   expect(status[1]).toMatch(/^GitHub's Copilot meter could not be read/)
+})
+
+test('Claude runs any /crosstalk-gh command through the crosstalk_gh tool, approvals and mode included', async ($, on) => {
+  const { files } = computer(on)
+  await $.session.start(START)
+  putState(files, stateOf({}))
+  const gh = async (args: string) => JSON.stringify(await $.tool.call({ tool: 'mcp__crosstalk__crosstalk_gh', args } as never))
+  expect(await gh('help')).toMatch(/crosstalk-gh/)
+  expect(await gh('approve r1')).toMatch(/Approved: r1 of fix-login-x9q2\./)
+  expect(JSON.parse(files.get(`${BOX}/copilot/tasks/fix-login-x9q2/decisions/r1.json`)).decision).toBe('approve')
+  expect(await gh('mode bypass')).toMatch(/Copilot mode: bypass/)
+  expect(JSON.parse(files.get(`${BOX}/copilot/config.json`)).mode).toBe('bypass')
 })
 
 test('stop asks a running task to stop, and says so of one that has ended', async ($, on) => {
@@ -240,7 +252,7 @@ test('stop asks a running task to stop, and says so of one that has ended', asyn
   expect(files.has(`${BOX}/copilot/tasks/fix-login-x9q2/stop`)).toBe(true)
   putState(files, stateOf({ state: 'completed', pending: [] }))
   expect(await say($, 'stop fix-login-x9q2')).toMatch(/has already ended \(completed\)/)
-  expect(await say($, 'help')).toMatch(/\/copilot <task> hands the task/)
+  expect(await say($, 'help')).toMatch(/\/crosstalk-gh <task> hands the task/)
 })
 
 test('a running task is a Crosstalk peer: a session can send it a follow-up by its address', async ($, on) => {
@@ -290,7 +302,7 @@ test('a permission request in the inbox pops up as a dialog, and the pick is a d
   expect(JSON.parse(files.get(`${BOX}/inbox/self-1/_delivered.json`))).toEqual(['000000001000000-a.json'])
 })
 
-test('/copilot mode lists or sets the mode, switches running tasks, and only the person may change it', async ($, on) => {
+test('/crosstalk-gh mode lists or sets the mode, switches running tasks, and only the person may change it', async ($, on) => {
   const { files } = computer(on)
   on('tool.call', { tool: 'AskUserQuestion' }, (_: any, e: any) => ({ result: { questions: e.questions, answers: { [e.questions[0].question]: 'Auto' } } }))
   await $.session.start(START)

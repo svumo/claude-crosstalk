@@ -1,4 +1,4 @@
-// `/copilot setup`: installs the pinned Copilot SDK into Crosstalk's own folder, then starts it
+// `/crosstalk-gh setup`: installs the pinned Copilot SDK into Crosstalk's own folder, then starts it
 // once to check the sign-in. Nothing is installed into the plugin or the person's project.
 //
 // The install runs npm with install scripts off, so the package and its bundled runtime arrive as

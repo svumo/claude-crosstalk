@@ -136,7 +136,7 @@ class TaskRun {
   constructor(options: TaskOptions) {
     this.options = options;
     this.paths = taskPaths(options.root, options.taskId);
-    for (const dir of [`${options.root}/copilot`, `${options.root}/copilot/tasks`, this.paths.dir, this.paths.events, this.paths.requests, this.paths.decisions]) {
+    for (const dir of [`${options.root}/crosstalk-gh`, `${options.root}/copilot/tasks`, this.paths.dir, this.paths.events, this.paths.requests, this.paths.decisions]) {
       privateDir(dir);
     }
     this.log = makeLog(this.paths.log, options.taskId);

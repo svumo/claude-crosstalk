@@ -76,7 +76,7 @@ export function credits(n: number, short = false): string {
   return whole.toLocaleString("en-US");
 }
 
-// What the meter says in words, for a line under a result or in /copilot status.
+// What the meter says in words, for a line under a result or in /crosstalk-gh status.
 export function quotaLine(q: Quota): string {
   if (q.unlimited) {
     return `GitHub Copilot (${q.plan || "plan"}): premium use unlimited.`;

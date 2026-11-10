@@ -15,6 +15,7 @@ export type Engine = {
     resolve(e: unknown): { Box: (props: Record<string, unknown>) => unknown; Text: (props: Record<string, unknown>) => unknown; Svg?: (props: Record<string, unknown>) => unknown };
   };
   command: { register(spec: { name: string; description: string; argumentHint?: string }): Promise<unknown> };
+  tool: { register(spec: { name: string; description: string; inputSchema: Record<string, unknown>; isDeferred?: boolean }): Promise<unknown> };
   fs: {
     read(path: string): Promise<string>;
     write(path: string, text: string): Promise<void>;
@@ -32,6 +33,10 @@ export type Engine = {
 // Who ran a command: the person's own Enter (or their bridge), or something else.
 export type Origin = { kind?: string } | undefined;
 export const isPerson = (origin: Origin): boolean => origin?.kind === "composer" || origin?.kind === "bridge";
+// Claude running the command through Crosstalk's crosstalk_gh tool. The person asked for Claude to
+// drive every command, approvals and setup included, so it counts the same as their own Enter.
+export const CLAUDE_TOOL: Origin = { kind: "claude-tool" };
+export const mayControl = (origin: Origin): boolean => isPerson(origin) || origin?.kind === CLAUDE_TOOL?.kind;
 
 export type PromptMedia =
   | { type: "image" | "document"; mediaType: string; base64: string; size: number; next?: number; unreadable?: undefined; deny?: undefined }
@@ -51,7 +56,7 @@ type Hook<E, R> = ($: Engine, e: E, next: (e: E) => Promise<R>) => Promise<R> | 
 // `on` as these hooks call it: an event, a matcher, and the hook.
 export type On = {
   (event: "command.run", matcher: { command: string }, hook: Hook<CommandInput, CommandAnswer>): unknown;
-  (event: "tool.call", matcher: { tool: string }, hook: Hook<{ file_path?: string; notebook_path?: string }, unknown>): unknown;
+  (event: "tool.call", matcher: { tool: string }, hook: Hook<{ file_path?: string; notebook_path?: string; args?: string }, unknown>): unknown;
   (event: "ui.render", matcher: { component: string }, hook: Hook<RenderInput, unknown>): unknown;
 };
 

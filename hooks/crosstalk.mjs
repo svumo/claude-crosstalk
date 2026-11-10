@@ -39,6 +39,7 @@ const PRUNE_DAYS = 7;
 const SEND = "mcp__crosstalk__send";
 const LIST = "mcp__crosstalk__list";
 const OPEN = "mcp__crosstalk__open";
+const COMMAND_TOOL = "mcp__crosstalk__crosstalk";
 // The desktop app's own tool that types a command into a new tab of its Terminal panel.
 const APP_TERMINAL = "mcp__terminal__run_in_terminal";
 // How long a session being opened has to show up, looked for once a second.
@@ -257,66 +258,71 @@ export function register(on) {
     return opened.error ? failed(opened.error) : { result: opened.text };
   });
 
-  on("command.run", { command: "crosstalk" }, async ($, e) => {
-    const words = parseWords(e.args);
-    const word = String(words[0] ?? "").toLowerCase();
-    if (word === "off" || word === "on") {
-      isOff = word === "off";
-      return { text: isOff ? "Crosstalk off: messages wait until you turn it on." : "Crosstalk on." };
+  on("command.run", { command: "crosstalk" }, async ($, e) => crosstalkCommand($, e.args));
+
+  // The same command line, run by Claude.
+  on("tool.call", { tool: COMMAND_TOOL }, async ($, e) => ({ result: (await crosstalkCommand($, String(e.args ?? ""))).text }));
+}
+
+async function crosstalkCommand($, args) {
+  const words = parseWords(args);
+  const word = String(words[0] ?? "").toLowerCase();
+  if (word === "off" || word === "on") {
+    isOff = word === "off";
+    return { text: isOff ? "Crosstalk off: messages wait until you turn it on." : "Crosstalk on." };
+  }
+  if (!me) {
+    return { text: "Crosstalk did not start in this session." };
+  }
+  if (word === "setup") {
+    return { text: await setupCommand($, words.slice(1)) };
+  }
+  if (word === "add") {
+    return { text: await addProfile($, String(words[1] ?? "").toLowerCase()) };
+  }
+  if (word === "open") {
+    const parts = parseOpenArgs(words.slice(1));
+    if (parts.error) {
+      return { text: parts.error };
     }
-    if (!me) {
-      return { text: "Crosstalk did not start in this session." };
+    const opened = await openSession($, parts.profile, parts.message, { model: parts.model, permissionMode: parts.permissionMode, openIn: parts.openIn });
+    return { text: opened.error ?? opened.text };
+  }
+  if (word === "open-in" || word === "where") {
+    return { text: await openInCommand($, String(words[1] ?? "").toLowerCase()) };
+  }
+  if (word === "to") {
+    return { text: await toCommand($, String(words[1] ?? ""), words.slice(2).join(" ")) };
+  }
+  if (word === "help") {
+    return { text: HELP };
+  }
+  // /crosstalk fuuk fix the tests: a profile's name where a command would be means open it.
+  if (word !== "" && (await isKnownProfile($, profileWord(word)))) {
+    const parts = parseOpenArgs(words);
+    if (parts.error) {
+      return { text: parts.error };
     }
-    if (word === "setup") {
-      return { text: await setupCommand($, words.slice(1)) };
-    }
-    if (word === "add") {
-      return { text: await addProfile($, String(words[1] ?? "").toLowerCase()) };
-    }
-    if (word === "open") {
-      const parts = parseOpenArgs(words.slice(1));
-      if (parts.error) {
-        return { text: parts.error };
-      }
-      const opened = await openSession($, parts.profile, parts.message, { model: parts.model, permissionMode: parts.permissionMode, openIn: parts.openIn });
-      return { text: opened.error ?? opened.text };
-    }
-    if (word === "open-in" || word === "where") {
-      return { text: await openInCommand($, String(words[1] ?? "").toLowerCase()) };
-    }
-    if (word === "to") {
-      return { text: await toCommand($, String(words[1] ?? ""), words.slice(2).join(" ")) };
-    }
-    if (word === "help") {
-      return { text: HELP };
-    }
-    // /crosstalk fuuk fix the tests: a profile's name where a command would be means open it.
-    if (word !== "" && (await isKnownProfile($, profileWord(word)))) {
-      const parts = parseOpenArgs(words);
-      if (parts.error) {
-        return { text: parts.error };
-      }
-      const opened = await openSession($, parts.profile, parts.message, { model: parts.model, permissionMode: parts.permissionMode, openIn: parts.openIn });
-      return { text: opened.error ?? opened.text };
-    }
-    if (word === "editor") {
-      return { text: await editorCommand($, String(words[1] ?? "").toLowerCase()) };
-    }
-    if (word === "usage") {
-      return { text: await usageCommand($, words.slice(1)) };
-    }
-    if (word === "move") {
-      return { text: await moveCommand($, String(words[1] ?? "").toLowerCase()) };
-    }
-    if (word === "launch") {
-      return { text: await launchCommand($, String(words[1] ?? "").toLowerCase(), words.slice(2).join(" ")) };
-    }
-    const now = await $.clock.now();
-    const others = (await readSessions($)).filter((r) => r.id !== me.id && isLive(r, now)).map(labelOf);
-    const hint = others.length ? "" : " /crosstalk setup connects your other profiles.";
-    await windowLookup;
-    return { text: `You are ${labelOf(me)}${windowNote(me)}${isOff ? " (off)" : ""}. Others running: ${others.join(", ") || "none"}. Wake-ups since you last typed: ${wakes} of ${limit}.${hint}\n${SHORT_HELP}` };
-  });
+    const opened = await openSession($, parts.profile, parts.message, { model: parts.model, permissionMode: parts.permissionMode, openIn: parts.openIn });
+    return { text: opened.error ?? opened.text };
+  }
+  if (word === "editor") {
+    return { text: await editorCommand($, String(words[1] ?? "").toLowerCase()) };
+  }
+  if (word === "usage") {
+    return { text: await usageCommand($, words.slice(1)) };
+  }
+  if (word === "move") {
+    return { text: await moveCommand($, String(words[1] ?? "").toLowerCase()) };
+  }
+  if (word === "launch") {
+    return { text: await launchCommand($, String(words[1] ?? "").toLowerCase(), words.slice(2).join(" ")) };
+  }
+  const now = await $.clock.now();
+  const others = (await readSessions($)).filter((r) => r.id !== me.id && isLive(r, now)).map(labelOf);
+  const hint = others.length ? "" : " /crosstalk setup connects your other profiles.";
+  await windowLookup;
+  return { text: `You are ${labelOf(me)}${windowNote(me)}${isOff ? " (off)" : ""}. Others running: ${others.join(", ") || "none"}. Wake-ups since you last typed: ${wakes} of ${limit}.${hint}\n${SHORT_HELP}` };
 }
 
 const SHORT_HELP = "/crosstalk <profile> [message] opens a session on that profile, where you are now (/crosstalk where shows how). /crosstalk to <who> <message> sends. /crosstalk setup connects profiles. /crosstalk help lists the rest.";
@@ -1208,6 +1214,12 @@ async function startUp($) {
       },
       required: [],
     },
+    isDeferred: false,
+  });
+  await $.tool.register({
+    name: "crosstalk",
+    description: "Run a /crosstalk command. `args` is everything after /crosstalk: empty shows who Crosstalk can reach; or <profile> [message], open <profile> [message], to <who> <message>, where|open-in [place], setup, add <profile>, editor [name], usage, move <profile>, launch <profile> [message], on, off, help.",
+    inputSchema: { type: "object", properties: { args: { type: "string", description: "Everything after /crosstalk, e.g. \"help\" or \"to fuuk/test-61dd hello\"" } }, required: ["args"] },
     isDeferred: false,
   });
   await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. <profile> [message] opens a session on that profile where you are; to <who> <message> sends; where shows or sets where open puts it; setup connects profiles; help lists the rest." });

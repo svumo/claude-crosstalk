@@ -61,7 +61,7 @@ const options = (w: World, config = {}) => ({
   config: { ...DEFAULT_CONFIG, permissionTimeoutMs: 5_000, turnTimeoutMs: 15_000, idleMs: 400, ...config },
 });
 
-// Stands in for the person: answers each request as it appears, the way /copilot approve does.
+// Stands in for the person: answers each request as it appears, the way /crosstalk-gh approve does.
 function person(w: World, answer: (request: PermissionRequestBody) => Decision | null): { seen: PermissionRequestBody[]; stop: () => void } {
   const paths = taskPaths(w.root, w.taskId);
   const seen: PermissionRequestBody[] = [];
@@ -114,7 +114,7 @@ test("a task runs in its own worktree, asks before writing, and replies with a s
   // the request reached the originating session before the reply, in words a v0 peer can show
   const kinds = inbox(w).map((m) => m.kind);
   assert.deepEqual(kinds, ["permission_request", "reply"]);
-  assert.match(inbox(w)[0]?.text ?? "", /Only you can answer: \/copilot approve r1/);
+  assert.match(inbox(w)[0]?.text ?? "", /Only you can answer: \/crosstalk-gh approve r1/);
   assert.equal(state(w).state, "completed");
   assert.match(audit(w), /"what":"request"[^\n]*copilot-was-here/);
   assert.match(audit(w), /"decision":"approve","decided_by":"command"/);
@@ -304,7 +304,7 @@ test("a backend that passes the self-test is remembered by version, and one that
 test("the sidecar runs as its own program, with its settings read from Crosstalk's folder", async () => {
   const w = world("cli-llll");
   handOver(w, "[quiet] Look around");
-  mkdirSync(`${w.root}/copilot`, { recursive: true });
+  mkdirSync(`${w.root}/crosstalk-gh`, { recursive: true });
   writeFileSync(`${w.root}/copilot/config.json`, JSON.stringify({ backendCommand: FAKE, idleMs: 200 }));
   const ran = spawnSync(process.execPath, [MAIN, "run", w.taskId, "--root", w.root], { encoding: "utf8" });
   assert.equal(ran.status, 0, ran.stderr);

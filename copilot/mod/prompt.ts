@@ -1,6 +1,6 @@
 // A Copilot permission request as Claude Code's own question dialog: what Copilot wants to do, and
 // buttons that answer it. The person's pick is written as a decision file (decided_by "button"),
-// the same file /copilot approve writes, so the sidecar's broker needs nothing new.
+// the same file /crosstalk-gh approve writes, so the sidecar's broker needs nothing new.
 //
 // One dialog at a time: requests that arrive while one is open wait their turn, and each is
 // checked again before it is shown, so one already answered (by a typed command, a mode switch or
@@ -69,7 +69,7 @@ async function answer($: Engine, root: string, body: PermissionRequestBody): Pro
   const { question, header, options } = permissionDialog(body);
   const picked = readChoice(await $.ui.ask(question, { header, options }).catch(() => ""));
   if (!picked) {
-    $.ui.toast(`Copilot ${body.request_id} is still waiting: /copilot approve ${body.request_id} or deny`);
+    $.ui.toast(`Copilot ${body.request_id} is still waiting: /crosstalk-gh approve ${body.request_id} or deny`);
     return;
   }
   if (!(await isWaiting($, root, body))) {
