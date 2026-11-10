@@ -41,10 +41,11 @@ export const isLive = (state: TaskStateFile | null): boolean => state !== null &
 // The share the ring shows: the month's premium credits used. An unlimited plan shows none.
 export const ringPercent = (quota: Quota): number => (quota.unlimited ? 0 : quota.percentUsed);
 
-// The words beside the ring: `gh · reset 1 Dec`, or `gh` when GitHub gives no reset day.
-export function ringLabel(quota: Quota): string {
+// The words beside the ring: `gh · gpt-5 · reset 1 Dec`. The model is the live task's own, else
+// the one new tasks use, else `default`; the reset day is left out when GitHub gives none.
+export function ringLabel(quota: Quota, model = ""): string {
   const reset = resetLabel(quota.resetDate);
-  return reset ? `gh · reset ${reset}` : "gh";
+  return ["gh", model.trim() || "default", ...(reset ? [`reset ${reset}`] : [])].join(" · ");
 }
 
 // When GitHub's meter can't be read, a word where the ring would be.

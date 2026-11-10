@@ -51,6 +51,8 @@ let quotaFailed = false;
 let quotaAt = -Infinity;
 let shown: TaskStateFile | null = null;
 let tickedAt = 0;
+// The model new tasks use, from config.json ("" for none).
+let configModel = "";
 // The ring's last number, and when it changed: it fills in for RING_FILL_MS after a change.
 const RING_FILL_MS = 1_000;
 let ringShown = -1;
@@ -70,6 +72,8 @@ async function tick($: Engine, force = false): Promise<void> {
   const now = await $.clock.now();
   tickedAt = now;
   shown = pickShown(await readStates($, host.root, me.id), now);
+  const saved = (await readConfig($, host.root)).model;
+  configModel = typeof saved === "string" ? saved : "";
   if (force || now - quotaAt >= (isLive(shown) ? LIVE_QUOTA_MS : IDLE_QUOTA_MS)) {
     quotaAt = now;
     const read = await readQuota($);
@@ -136,7 +140,7 @@ export function registerCopilot(on: On): void {
       // The terminal draws Svg as nothing, so it gets skins' text meter there.
       // Short, to save room on the row: `11% gh · reset 1 Dec` (build choice: gh, as the meter is
       // GitHub's), the day GitHub's monthly allowance starts again.
-      const label = ringLabel(quota);
+      const label = ringLabel(quota, (isLive(shown) && shown?.model) || configModel);
       if (e.surface !== "terminal" && ui.Svg) {
         const ring = ringSvg(percent, label, animate);
         mine.push(ui.Svg({ key: "usage-copilot", source: ring.source, alt: ring.alt, width: ring.width, height: ring.height }));
