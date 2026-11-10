@@ -15,7 +15,7 @@ import type { Quota } from "../protocol/quota.ts";
 import { isMode, makeEnvelope, MODES } from "../protocol/schema.ts";
 import type { Decision, Mode, TaskBody } from "../protocol/schema.ts";
 import { DEFAULT_CAPS } from "../sidecar/budget.ts";
-import { HELP, isRunning, MODE_TEXT, parseCopilot, pickTask, statusLine } from "./args.ts";
+import { HELP, isRunning, MODE_TEXT, parseCopilot, pickTask, pickViewed, statusLine, viewerCommand } from "./args.ts";
 import { captureContext } from "./capture.ts";
 import type { Who } from "./capture.ts";
 import { CLAUDE_TOOL, mayControl } from "./engine.ts";
@@ -24,7 +24,14 @@ import { blockBars, COPILOT_ROW_KEY, intoBand, isLive, PALETTE, pickShown, ringL
 import type { Piece } from "./meter.ts";
 
 // What Crosstalk hands over at session start: its shared folder, and this session as it is now.
-export type Host = { root: string; who: () => (Who & { address: string }) | null };
+// openViewer runs a shell line in a new terminal where the session is (a Terminal-panel tab in the
+// desktop app, else a terminal window), and says where, or why it couldn't.
+export type Host = {
+  root: string;
+  who: () => (Who & { address: string }) | null;
+  openViewer?: (command: string, cwd: string, title: string) => Promise<{ place?: string; error?: string }>;
+  isWindows?: () => Promise<boolean>;
+};
 
 // The slash command, and the tool that lets Claude run the same command line.
 export const COMMAND = "crosstalk-gh";
@@ -282,7 +289,7 @@ async function handOver($: Engine, root: string, me: Who & { address: string }, 
   const config = await readConfig($, root);
   const mode = picked.mode ?? (isMode(config.mode) ? config.mode : "ask");
   const model = picked.model ?? (typeof config.model === "string" && config.model !== "" ? config.model : "");
-  const lines = [`Copilot task ${id} started in ${mode} mode${model ? ` on ${model}` : ""}, on branch copilot/${id} from ${context.git.branch || context.git.head_sha.slice(0, 12)}. The result arrives as a Crosstalk message.`];
+  const lines = [`Copilot task ${id} started in ${mode} mode${model ? ` on ${model}` : ""}, on branch copilot/${id} from ${context.git.branch || context.git.head_sha.slice(0, 12)}. The result arrives as a Crosstalk message; /crosstalk-gh open ${id} watches it live in a terminal.`];
   if (isDirty(context.git)) {
     lines.push(`Your uncommitted changes (${dirty} ${dirty === 1 ? "file" : "files"}) aren't in its worktree, which is cut from the last commit.`);
   }
@@ -436,6 +443,32 @@ async function stop($: Engine, root: string, sessionId: string, named: string): 
   return `Stopping ${picked.state.task_id}. Its branch and worktree are kept; the reply says how to discard them.`;
 }
 
+// A terminal that shows the task live and answers its requests (copilot/tui/attach.ts). Anyone may
+// open one, Claude too: it only shows, and its keys are the person's own.
+async function openView($: Engine, given: Host, sessionId: string, named: string): Promise<string> {
+  const picked = pickViewed(await readStates($, given.root, sessionId), named);
+  if (!picked.state) {
+    return picked.error ?? "";
+  }
+  if (!given.openViewer || !given.isWindows) {
+    return "This version of Crosstalk can't open a terminal from here.";
+  }
+  const fault = await nodeFault($);
+  if (fault !== "") {
+    return fault;
+  }
+  const state = picked.state;
+  const script = `${String($.plugin.root).replace(/\\/g, "/").replace(/\/+$/, "")}/copilot/tui/attach.ts`;
+  const command = viewerCommand(script, state.task_id, given.root, await given.isWindows());
+  const cwd = state.worktree || (await $.session.cwd());
+  const opened = await given.openViewer(command, cwd, `copilot ${state.task_id}`);
+  if (opened.error) {
+    return `${opened.error}\nTo watch it yourself, run: ${command}`;
+  }
+  const ended = isRunning(state) ? "" : ` It has ended (${state.state.replace("_", " ")}), so the view replays it.`;
+  return `Opened ${state.task_id} in ${opened.place ?? "a new terminal"}.${ended} Keys there: y / a / n answer a request, s stops the task, q closes the view.`;
+}
+
 // Installing software is the person's call, so only a command they typed runs it (build choice).
 async function runSetup($: Engine, root: string, origin: Origin): Promise<string> {
   if (!mayControl(origin)) {
@@ -576,6 +609,8 @@ async function copilotCommand($: Engine, args: string, origin: Origin, fromTool?
       return decide($, host.root, me.id, command.decision, command.requestId, command.taskId, origin);
     case "stop":
       return stop($, host.root, me.id, command.taskId);
+    case "open":
+      return openView($, host, me.id, command.taskId);
     case "mode":
       return setMode($, host.root, me.id, command.mode, command.taskId, origin);
     case "models":

@@ -25,12 +25,16 @@ export function makeAudit(root: string, taskId: string): Audit {
 }
 
 const FLUSH_CHARS = 2_000;
+// Streamed text is written at least this often, so the attach viewer shows it as it comes.
+const FLUSH_MS = 400;
 
 // The task's events, one small file each, numbered so their names sort in order. Text that
-// streams in pieces (a message, a thought) is gathered into one event until something else happens.
+// streams in pieces (a message, a thought) is gathered into one event until something else
+// happens, it grows long, or FLUSH_MS passes; readers join consecutive pieces of one type.
 export class EventLog {
   private seq = 0;
   private held: { type: "message" | "thought"; text: string } | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
   private readonly paths: TaskPaths;
   private readonly taskId: string;
 
@@ -46,6 +50,9 @@ export class EventLog {
     this.held = { type, text: (this.held?.text ?? "") + piece };
     if (this.held.text.length >= FLUSH_CHARS) {
       this.flush();
+    } else if (!this.timer) {
+      this.timer = setTimeout(() => this.flush(), FLUSH_MS);
+      this.timer.unref();
     }
   }
 
@@ -55,6 +62,10 @@ export class EventLog {
   }
 
   flush(): void {
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
     const held = this.held;
     this.held = null;
     if (held && held.text !== "") {

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { parseCopilot, pickTask, statusLine } from '../copilot/mod/args.ts'
+import { parseCopilot, pickTask, pickViewed, statusLine, viewerCommand } from '../copilot/mod/args.ts'
 import type { TaskStateFile } from '../copilot/protocol/layout.ts'
 import { permissionText, personOnly } from '../copilot/protocol/render.ts'
 import { emptyUsage, makeEnvelope, parseEnvelope } from '../copilot/protocol/schema.ts'
@@ -106,6 +106,10 @@ test('what follows /crosstalk-gh is a command only in its exact shape, else a ta
   expect(parseCopilot('deny r12')).toEqual({ verb: 'decide', decision: 'deny', requestId: 'r12', taskId: '' })
   expect(parseCopilot('stop')).toEqual({ verb: 'stop', taskId: '' })
   expect(parseCopilot('stop fix-login-x9q2')).toEqual({ verb: 'stop', taskId: 'fix-login-x9q2' })
+  expect(parseCopilot('open')).toEqual({ verb: 'open', taskId: '' })
+  expect(parseCopilot('open fix-login-x9q2')).toEqual({ verb: 'open', taskId: 'fix-login-x9q2' })
+  expect(parseCopilot('open settings')).toEqual({ verb: 'task', task: 'open settings' })
+  expect(parseCopilot('open the settings page and fix it')).toEqual({ verb: 'task', task: 'open the settings page and fix it' })
   expect(parseCopilot('stop the flaky test from failing')).toEqual({ verb: 'task', task: 'stop the flaky test from failing' })
   expect(parseCopilot('approve the design doc and tidy it')).toEqual({ verb: 'task', task: 'approve the design doc and tidy it' })
   expect(parseCopilot('status of the build is red, fix it')).toEqual({ verb: 'task', task: 'status of the build is red, fix it' })
@@ -434,4 +438,17 @@ test('the copilot ring names a running task\'s own model, and a new default at o
   const idle = await mountBand($, 'terminal')
   expect(await idle.find({ type: 'Text', text: ' 11% gh · gpt-5-mini · reset 1 Dec' })).toBeDefined()
   await idle.unmount()
+})
+
+test('open picks the running task, else the newest, and builds a quoted shell line for the viewer', async () => {
+  const done = stateOf({ state: 'completed', pending: [] })
+  const older = stateOf({ task_id: 'older-aaaa', state: 'failed', pending: [] })
+  expect(pickViewed([done, older], '').state?.task_id).toBe('fix-login-x9q2')
+  expect(pickViewed([done, stateOf({ task_id: 'live-bbbb' })], '').state?.task_id).toBe('live-bbbb')
+  expect(pickViewed([done], 'nope-cccc').error).toMatch(/no task nope-cccc/)
+  expect(viewerCommand("C:/Users/o'neil/attach.ts", 'fix-login-x9q2', "C:/Users/o'neil/.claude-crosstalk", true))
+    .toBe("& node 'C:/Users/o''neil/attach.ts' fix-login-x9q2 --root 'C:/Users/o''neil/.claude-crosstalk'")
+  expect(viewerCommand('/home/me/attach.ts', 'fix-login-x9q2', "/home/it's", false))
+    .toBe("node '/home/me/attach.ts' fix-login-x9q2 --root '/home/it'\\''s'")
+  expect(() => viewerCommand('/a.ts', 'x; rm -rf /', '/r', false)).toThrow()
 })

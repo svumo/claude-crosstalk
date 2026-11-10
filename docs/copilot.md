@@ -33,10 +33,31 @@ Crosstalk records where the session is (folder, repository, branch, commit, the 
 | `/crosstalk-gh approve <request>` | Allows that one request |
 | `/crosstalk-gh allow <request>` | Allows it, and the same kind for the rest of the task (see below) |
 | `/crosstalk-gh deny <request>` | Refuses it |
+| `/crosstalk-gh open [task]` | Opens a terminal that shows the task live and answers its requests (see below) |
 | `/crosstalk-gh stop [task]` | Stops a task; its branch and worktree are kept |
 | `/crosstalk-gh setup` | Installs the Copilot SDK and checks the sign-in (run it again to repair) |
 
 Sending a follow-up is an ordinary Crosstalk message to the task (`/crosstalk to copilot/<task> ...`, or ask Claude to send it). Only the session that started a task can add to it, and the task stays up for ten minutes after each turn to hear one.
+
+## Watch it live
+
+`/crosstalk-gh open` opens a terminal on the task: what Copilot says and thinks, its plan, each tool it runs with the exact command, and a diff of every file it changes. With no task named it opens the running one, or the newest when none runs; a task that has ended is replayed.
+
+In the Claude desktop app it is a new tab of the app's Terminal panel (the app asks you to approve the command first); elsewhere, or with `/crosstalk open-in window`, a terminal window: Windows Terminal, Terminal.app, or the first Linux terminal found. If neither works, the answer gives the command to run yourself:
+
+```
+node <plugin folder>/copilot/tui/attach.ts <task> --root ~/.claude-crosstalk
+```
+
+| Key | What it does |
+|---|---|
+| `y` | Approves the request shown |
+| `a` | Allows it for the rest of the task (when the request offers it) |
+| `n` | Denies it |
+| `s`, then `y` | Stops the task |
+| `q` or Ctrl+C | Closes the view; the task keeps running |
+
+A request answered here counts as yours, like a typed command or the pop-up; whichever answers first wins. The view closes by itself when the task ends. Everything Copilot wrote is stripped of terminal control characters before it is shown, so its output can't move the cursor or rename the window.
 
 ## Requests
 
@@ -107,9 +128,18 @@ Run these in a real session, in a repository you don't mind a test branch in. Ea
 
 What step 2 does on the first task only: the safety self-test runs first, so the first task takes a little longer and uses one extra small prompt.
 
-## Not in Phase 1
+## Manual test (Phase 2)
 
-- Copilot's work is not shown live; `/crosstalk-gh status` and the reply are the view. (Phase 2: a terminal view you can also answer from.)
-- No chat of its own in the desktop app's sidebar (Phase 3), no pane or status line (Phase 4).
+On Windows, and on macOS when you have one:
+
+1. `/crosstalk-gh Run the tests and tell me what fails`, then `/crosstalk-gh open`. In the desktop app, approve the command the app shows; a Terminal-panel tab opens. In a plain terminal session a new terminal window opens instead.
+2. The view shows `Copilot task ...`, the branch and the task, then Copilot's words as they come.
+3. When Copilot wants to run the tests, a yellow card shows the exact command and `high risk`, with `y approve   n deny`. Press `y`. The view says `Approved: r1.`, the pop-up in the Claude session goes stale (picking in it does nothing), and the tool line turns from `…` to `▶` to `✓`.
+4. For a task that writes a file, the view shows the file's diff once the write is done.
+5. Press `q`: the view closes and the task carries on. `/crosstalk-gh open` again replays it from the start.
+6. Press `s`, then `y`: the task stops, and the reply in the Claude session says it was stopped. The view closes by itself.
+
+## Not built yet
+
+- No chat of its own in the desktop app's sidebar (Phase 3), no Copilot pane or permission cards (Phase 4).
 - Messages are not signed (Phase 5). Until then, treat `~/.claude-crosstalk` as you treat any folder only you can write to.
-- Quota is not shown yet: the SDK can report it, and the status line in Phase 4 will.

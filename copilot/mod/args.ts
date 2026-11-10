@@ -13,6 +13,7 @@ export type CopilotCommand =
   | { verb: "setup" }
   | { verb: "decide"; decision: Decision; requestId: string; taskId: string }
   | { verb: "stop"; taskId: string }
+  | { verb: "open"; taskId: string }
   | { verb: "mode"; mode: Mode | ""; taskId: string }
   | { verb: "models" }
   | { verb: "model"; model: string }
@@ -101,9 +102,13 @@ export function parseCopilot(args: string): CopilotCommand {
   if (first === "setup" && words.length === 1) {
     return { verb: "setup" };
   }
-  const taskId = words.length === 3 || (first === "stop" && words.length === 2) ? (words.at(-1) ?? "") : "";
+  const taskId = words.length === 3 || ((first === "stop" || first === "open") && words.length === 2) ? (words.at(-1) ?? "") : "";
   if (first === "stop" && words.length <= 2 && (taskId === "" || isTaskId(taskId))) {
     return { verb: "stop", taskId };
+  }
+  // A task id always ends in "-" and four characters, so "/crosstalk-gh open settings" is a task.
+  if (first === "open" && words.length <= 2 && (taskId === "" || (isTaskId(taskId) && /-[a-z0-9]{4}$/.test(taskId)))) {
+    return { verb: "open", taskId };
   }
   const decision = DECIDE[first];
   if (decision && (words.length === 2 || words.length === 3) && REQUEST_ID.test(words[1] ?? "") && (taskId === "" || isTaskId(taskId))) {
@@ -119,6 +124,7 @@ export const HELP = [
   "/crosstalk-gh models lists the models; /crosstalk-gh model <id> picks the one new tasks use.",
   "/crosstalk-gh status shows this session's tasks and any request waiting for you.",
   "Copilot's requests pop up for you to answer. /crosstalk-gh approve <request>, /crosstalk-gh allow <request> (for the rest of the task) and /crosstalk-gh deny <request> answer them too. Only you can.",
+  "/crosstalk-gh open [task] opens a terminal that shows the task live (what Copilot says, the tools it runs, the diffs) and answers its requests with a key.",
   "/crosstalk-gh stop [task] stops a task.",
   "/crosstalk-gh setup installs the Copilot SDK that tasks run on, and checks who Copilot is signed in as. Without it, tasks run on Copilot CLI over ACP.",
 ].join("\n");
@@ -136,6 +142,27 @@ export function statusLine(state: TaskStateFile, now: number): string {
   const detail = state.detail && state.state !== "awaiting_approval" ? ` ${state.detail}` : "";
   const mode = state.mode && state.mode !== "ask" ? ` (${state.mode})` : "";
   return `${state.task_id}${mode}: ${state.state.replace("_", " ")}, started ${age(now - state.started_at)} ago, ${usageLine(state.usage)}.${detail}${waiting}`;
+}
+
+// The shell line that runs the attach viewer for a task: PowerShell on Windows (the shell of the
+// app's Terminal panel and of the window Crosstalk opens there), else a POSIX shell. The paths are
+// quoted for that shell; the task id is checked to be plain words.
+export function viewerCommand(script: string, taskId: string, root: string, isWindows: boolean): string {
+  if (!isTaskId(taskId)) {
+    throw new Error(`not a task id: ${taskId}`);
+  }
+  const quote = isWindows
+    ? (text: string) => `'${text.replace(/'/g, "''")}'`
+    : (text: string) => `'${text.replace(/'/g, "'\\''")}'`;
+  return `${isWindows ? "& " : ""}node ${quote(script)} ${taskId} --root ${quote(root)}`;
+}
+
+// Which task open means: the one named; else the only running one; else, with none running, the newest.
+export function pickViewed(states: TaskStateFile[], taskId: string): { state?: TaskStateFile; error?: string } {
+  if (taskId === "" && states.length > 0 && !states.some(isRunning)) {
+    return { state: states[0] };
+  }
+  return pickTask(states, taskId, isRunning, "is running");
 }
 
 // Which task a command means: the one named, else the only one that fits. Returns { state } or { error }.

@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+**Watch a Copilot task live (Phase 2 of 5: in a terminal)**
+- **`/crosstalk-gh open [task]`** opens a terminal on the task: Copilot's words as they come, its plan, each tool it runs with the exact command and whether it is waiting, running, done or failed, and a diff of each file it changed. In the desktop app it is a Terminal-panel tab (the app asks you to approve the command); elsewhere a terminal window. A task that has ended is replayed.
+- **Answer requests with a key** there: `y` approve, `a` allow for the rest of the task, `n` deny. It counts as yours, like the pop-up and the typed commands; whichever answers first wins. `s` then `y` stops the task, `q` closes the view and leaves the task running.
+- Copilot's output is stripped of terminal control characters before it is shown, so it can't move the cursor, rename the window or hide text.
+- The task's events are written at least every 0.4 s while Copilot streams text, so the view keeps up (they used to wait for 2,000 characters or the next tool).
+- The start message names the command: `/crosstalk-gh open <task> watches it live in a terminal.`
+
 **Hand a task to GitHub Copilot CLI (Phase 1 of 5: from the command line)**
 - **The command is `/crosstalk-gh`** (it was `/copilot`).
 - **Claude can drive Crosstalk**: two new tools run the same command lines you type. `crosstalk` runs any `/crosstalk` command and `crosstalk_gh` runs any `/crosstalk-gh` command, including approve, allow, deny, mode, model and setup. Those last ones used to need your own Enter; you asked for Claude to run them too.

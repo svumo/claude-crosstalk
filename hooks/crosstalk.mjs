@@ -972,6 +972,39 @@ async function openInApp($, profile, command) {
   return {};
 }
 
+// A terminal for the Copilot attach viewer (`command`, a shell line the Copilot module built), in
+// `cwd`. In the desktop app it is a Terminal-panel tab, through the app's own tool (the app asks
+// the person to approve the command); else, or when that fails or open-in is window, a terminal
+// window. Returns { place } or { error }.
+async function openViewer($, command, cwd, title) {
+  const pc = await computer($);
+  const setup = await readJson($, `${root}/setup.json`, {});
+  const wanted = String((await $.env.get("CLAUDE_CROSSTALK_OPEN_IN")) || setup.openIn || "auto").toLowerCase();
+  const inApp = (await $.env.get("CLAUDE_CODE_ENTRYPOINT")) === DESKTOP_ENTRYPOINT;
+  let fellBack = "";
+  if (inApp && wanted !== "window") {
+    try {
+      const answer = await $.tool.call({ tool: APP_TERMINAL, command, cwd, title });
+      if (!answer?.deny && !answer?.isError) {
+        return { place: "a new tab of the app's Terminal panel" };
+      }
+      fellBack = ` (the Terminal panel didn't run it: ${String(answer.deny || resultText(answer)).slice(0, 200)})`;
+    } catch (err) {
+      fellBack = ` (the Terminal panel couldn't be reached: ${String(err?.message ?? err).slice(0, 200)})`;
+    }
+  }
+  const opener = pc.isWindows ? { argv: windowArgv(cwd, command) } : await unixWindow($, command, cwd);
+  if (opener.error) {
+    return { error: opener.error };
+  }
+  const place = opener.place ?? "a new terminal window";
+  const ran = await $.process.run(opener.argv, { timeoutMs: opener.timeoutMs ?? 30_000 }).catch(() => null);
+  if (!ran || ran.exitCode !== 0) {
+    return { error: `Couldn't open ${place}${ran?.stderr ? `: ${ran.stderr.trim().slice(0, 200)}` : "."}${fellBack}` };
+  }
+  return { place: `${place}${fellBack}` };
+}
+
 // A Code session in the profile's own Claude app window (the main window for default), through the
 // plugin's app-windows scripts: the app's claude://code/new link in that window, with the folder
 // and the first message filled in, and Send pressed when there is a message. A Code-tab session
@@ -1088,12 +1121,12 @@ function resultText(answer) {
 
 // A new terminal on macOS (Terminal.app) or Linux (the first terminal found). Returns
 // { argv, place } or { error }.
-async function unixWindow($, command) {
+async function unixWindow($, command, cwd = me.cwd) {
   const system = await $.process.run(["uname", "-s"], { timeoutMs: 10_000 }).catch(() => null);
   if (String(system?.stdout ?? "").trim() === "Darwin") {
     // The first time, macOS asks the person whether this may control Terminal, and osascript
     // waits for the answer, so it gets two minutes.
-    return { argv: macArgv(me.cwd, command), place: "a new Terminal window", isMac: true, timeoutMs: 120_000 };
+    return { argv: macArgv(cwd, command), place: "a new Terminal window", isMac: true, timeoutMs: 120_000 };
   }
   const candidates = linuxCandidates({
     wanted: await $.env.get("CLAUDE_CROSSTALK_TERMINAL"),
@@ -1108,7 +1141,7 @@ async function unixWindow($, command) {
     return { error: `Couldn't find a terminal to open: Crosstalk looks for ${LINUX_TERMINALS.join(", ")}${candidates.includes("tmux") ? "" : " (tmux only from inside tmux)"}, and the desktop ones need a display. Set CLAUDE_CROSSTALK_TERMINAL to choose one, or use VS Code with the Crosstalk terminal helper.` };
   }
   const shell = await $.env.get("SHELL");
-  return { argv: linuxArgv(terminal, me.cwd, command, shell), place: terminal === "tmux" ? "a new tmux window" : `a new ${terminal} window` };
+  return { argv: linuxArgv(terminal, cwd, command, shell), place: terminal === "tmux" ? "a new tmux window" : `a new ${terminal} window` };
 }
 
 async function watchOpened($, profile, since, message, cwd = openFolder ?? me.cwd) {
@@ -1227,6 +1260,8 @@ async function startUp($) {
   await startCopilot($, {
     root,
     who: () => (me ? { id: me.id, address: me.address, profile: me.profile, title: me.title, configDir, transcript: titling?.transcript ?? "" } : null),
+    openViewer: (command, cwd, title) => openViewer($, command, cwd, title),
+    isWindows: async () => (await computer($)).isWindows,
   });
   $.clock.every(BEAT_MS, () => beat($).catch(() => {}));
   $.clock.every(POLL_MS, () => poll($).catch(() => {}));
