@@ -88,13 +88,6 @@ test('the ring joins the skins meters, after 7d, and stays apart when there is n
   expect(band.children[0]!.children[0]!.children.length).toBe(3)
   expect(intoBand({ type: 'Box', props: { flexDirection: 'row' }, children: [] }, [svg('copilot')]).joined).toBe(false)
   expect(intoBand(null, [svg('copilot')]).joined).toBe(false)
-  // The task goes on its own row under the band row (the one with Compact), not into it.
-  const task = { type: 'Box', props: { flexDirection: 'row' }, children: ['task'] }
-  const under: any = intoBand(band, [svg('copilot')], [], task)
-  expect(under.joined).toBe(true)
-  expect(under.node.children[0].children[0].children[0].children.map((c: any) => c.props.alt)).toEqual(['context', '5h', '7d', 'copilot'])
-  expect(under.node.children[0].children[1]).toBe(task)
-  expect(intoBand(band, [svg('copilot')], [], null).node.children[0].children).toHaveLength(2)
 })
 
 test('the task beside the ring has a live dot while Copilot works', async () => {

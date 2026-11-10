@@ -172,12 +172,10 @@ const isMeterBox = (n: Node): boolean =>
   && (n.props?.justifyContent === "space-evenly" || n.props?.justifyContent === "flex-start");
 
 // `lead` goes before skins' meters (the `claude` label), `mine` after them.
-// `below` is a row of its own under the band's row (the one holding Compact), so nothing on it can
-// sit beneath that button; the band row and `below` are wrapped in a column.
-export function intoBand(node: unknown, mine: unknown[], lead: unknown[] = [], below: unknown = null): { node: unknown; joined: boolean } {
+export function intoBand(node: unknown, mine: unknown[], lead: unknown[] = []): { node: unknown; joined: boolean } {
   if (Array.isArray(node)) {
     for (let i = 0; i < node.length; i++) {
-      const inner = intoBand(node[i], mine, lead, below);
+      const inner = intoBand(node[i], mine, lead);
       if (inner.joined) {
         return { node: node.map((item, j) => (j === i ? inner.node : item)), joined: true };
       }
@@ -191,14 +189,9 @@ export function intoBand(node: unknown, mine: unknown[], lead: unknown[] = [], b
   if (isMeterBox(node)) {
     return { node: { ...node, children: [...lead, ...kids, ...mine] }, joined: true };
   }
-  const holdsMeters = below !== null && kids.some((k) => isEl(k) && isMeterBox(k));
-  const inner = intoBand(kids, mine, lead, holdsMeters ? null : below);
+  const inner = intoBand(kids, mine, lead);
   if (!inner.joined) {
     return { node, joined: false };
   }
-  const joinedNode = { ...node, children: inner.node };
-  if (holdsMeters) {
-    return { node: { type: "Box", props: { flexDirection: "column", flexGrow: node.props?.flexGrow ?? 1 }, children: [joinedNode, below] }, joined: true };
-  }
-  return { node: joinedNode, joined: true };
+  return { node: { ...node, children: inner.node }, joined: true };
 }
