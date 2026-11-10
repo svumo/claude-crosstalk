@@ -97,10 +97,10 @@ export async function runTurn(prompt: string, deps: TurnDeps): Promise<TurnEnd> 
     if (why !== "") {
       return { kind: why, said };
     }
-    if (error instanceof BackendGone) {
-      return { kind: "gone", detail: error.message, ranTool, said };
-    }
-    throw error;
+    // The backend ended, or reported an error of its own: either way the turn is over.
+    const detail = error instanceof Error ? error.message : String(error);
+    log(error instanceof BackendGone ? "warn" : "error", "turn-failed", { detail_chars: detail.length });
+    return { kind: "gone", detail, ranTool, said };
   } finally {
     clearInterval(watch);
     events.flush();

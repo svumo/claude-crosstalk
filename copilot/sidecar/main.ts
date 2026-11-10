@@ -1,41 +1,23 @@
 // The Copilot sidecar's entry point: one process for one task.
 //
 //   node copilot/sidecar/main.ts run <task id> --root <Crosstalk's folder>
-//   node copilot/sidecar/main.ts start <task id> --root <Crosstalk's folder>   (starts `run` apart from the caller, and returns)
-//
+//   node copilot/sidecar/main.ts start <task id> --root <Crosstalk's folder>   (starts `run` apart from the caller, and returns)//
 // Settings come from <root>/copilot/config.json. The backend command comes from there too, never
 // from the task, so a handoff cannot name a program to run.
 
 import { spawn } from "node:child_process";
-import { openSync } from "node:fs";
+import { existsSync, openSync } from "node:fs";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { AcpBackend, copilotAcpCommand } from "../backend/acp.ts";
+import { SdkBackend, sdkEntry } from "../backend/sdk.ts";
 import { isTaskId } from "../protocol/ids.ts";
 import { taskPaths } from "../protocol/layout.ts";
 import { childEnv } from "./env.ts";
-import { privateDir, readJson } from "./files.ts";
-import { DEFAULT_CONFIG, runTask } from "./task.ts";
-import type { TaskConfig } from "./task.ts";
-
-type Settings = TaskConfig & { backendCommand: string[] };
-
-const positive = (value: unknown, fallback: number): number => (typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback);
-
-function readSettings(root: string): Settings {
-  const file = readJson(`${root}/copilot/config.json`);
-  const saved = (typeof file === "object" && file !== null ? file : {}) as Record<string, unknown>;
-  const command = Array.isArray(saved.backendCommand) ? saved.backendCommand.filter((word): word is string => typeof word === "string" && word !== "") : [];
-  return {
-    model: typeof saved.model === "string" ? saved.model : DEFAULT_CONFIG.model,
-    worktreeRoot: typeof saved.worktreeRoot === "string" ? saved.worktreeRoot : DEFAULT_CONFIG.worktreeRoot,
-    permissionTimeoutMs: positive(saved.permissionTimeoutMs, DEFAULT_CONFIG.permissionTimeoutMs),
-    turnTimeoutMs: positive(saved.turnTimeoutMs, DEFAULT_CONFIG.turnTimeoutMs),
-    idleMs: positive(saved.idleMs, DEFAULT_CONFIG.idleMs),
-    backendCommand: command,
-  };
-}
+import { privateDir } from "./files.ts";
+import { chooseBackend, readSettings } from "./settings.ts";
+import { runTask } from "./task.ts";
 
 function rootFrom(args: string[]): string {
   const at = args.indexOf("--root");
@@ -45,9 +27,12 @@ function rootFrom(args: string[]): string {
 
 async function run(taskId: string, root: string): Promise<number> {
   const settings = readSettings(root);
+  const backendName = chooseBackend(settings, existsSync(sdkEntry(root)));
   const state = await runTask({
-    root, taskId, backendName: "acp", config: settings, env: childEnv(process.env),
-    makeBackend: (model) => new AcpBackend(settings.backendCommand.length > 0 ? settings.backendCommand : copilotAcpCommand(model || undefined)),
+    root, taskId, backendName, config: settings, env: childEnv(process.env),
+    makeBackend: (model) => backendName === "sdk"
+      ? new SdkBackend(sdkEntry(root), settings.account)
+      : new AcpBackend(settings.backendCommand.length > 0 ? settings.backendCommand : copilotAcpCommand(model || undefined)),
   });
   return state === "completed" ? 0 : 1;
 }

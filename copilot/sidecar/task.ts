@@ -70,7 +70,7 @@ function detailOf(end: TurnEnd): string {
     case "stopped": return "Stopped at your request.";
     case "timeout": return "Stopped: the turn ran past its time limit.";
     case "breach": return `STOPPED FOR SAFETY. ${end.detail}. Copilot was ended at once; check the worktree before using anything from it.`;
-    case "gone": return `Copilot's process ended unexpectedly (${end.detail}).`;
+    case "gone": return `Copilot ended unexpectedly (${end.detail}).`;
   }
 }
 
@@ -196,7 +196,7 @@ class TaskRun {
     const start = async (): Promise<string> => {
       try {
         const info = await backend.start({ cwd: tree.path, env: this.options.env, ...(model ? { model } : {}) });
-        this.log("info", "backend", { name: info.name, version: info.version });
+        this.log("info", "backend", { name: info.name, version: info.version, account: info.account ?? null });
         return "";
       } catch (error) {
         return error instanceof Error ? error.message : String(error);

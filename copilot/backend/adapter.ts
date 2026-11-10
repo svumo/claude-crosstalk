@@ -44,7 +44,8 @@ export type StartOptions = {
   env: Record<string, string>;
 };
 
-export type BackendInfo = { name: string; version: string };
+// `account` is the GitHub login Copilot is signed in as, where the backend can say.
+export type BackendInfo = { name: string; version: string; account?: string };
 
 export interface CopilotBackend {
   start(options: StartOptions): Promise<BackendInfo>;
