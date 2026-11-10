@@ -45,7 +45,8 @@ export const MODES = ["ask", "auto", "bypass"] as const;
 export type Mode = (typeof MODES)[number];
 export const isMode = (value: unknown): value is Mode => MODES.includes(value as Mode);
 
-export type TaskBody = { task_id: string; task: string; model?: string; mode?: Mode };
+// images: names of pictures pasted with the task, in its attachments folder (`1.png`).
+export type TaskBody = { task_id: string; task: string; model?: string; mode?: Mode; images?: string[] };
 
 export type ReplyBody = {
   task_id: string;
@@ -125,6 +126,9 @@ const isText = (v: unknown): v is string => typeof v === "string" && v !== "";
 const isCount = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
 const oneOf = <T extends string>(list: readonly T[], v: unknown): v is T => typeof v === "string" && (list as readonly string[]).includes(v);
 
+// A picture's name in a task's attachments folder: a number and an image extension, so it can't leave the folder.
+export const isImageName = (v: unknown): v is string => typeof v === "string" && /^\d{1,3}\.(png|jpg|gif|webp)$/.test(v);
+
 const bad = (error: string): { ok: false; error: string } => ({ ok: false, error });
 
 // Whether a body has what its kind needs. Returns the first thing missing, or "".
@@ -134,7 +138,10 @@ function bodyFault(kind: Kind, body: Record<string, unknown>): string {
   }
   switch (kind) {
     case "task":
-      return isText(body.task) ? "" : "body.task";
+      if (!isText(body.task)) {
+        return "body.task";
+      }
+      return body.images === undefined || (Array.isArray(body.images) && body.images.every(isImageName)) ? "" : "body.images";
     case "reply":
       return oneOf(FINAL_STATES, body.outcome) && typeof body.summary === "string" && isObject(body.commands) && isObject(body.usage) ? "" : "body (reply)";
     case "status":

@@ -23,13 +23,25 @@ export type Engine = {
   };
   process: { run(argv: readonly string[], init?: { cwd?: string; timeoutMs?: number }): Promise<RunResult> };
   env: { get(name: string): Promise<string | undefined> };
-  clock: { now(): Promise<number>; every(ms: number, fn: () => unknown): unknown };
+  clock: { now(): Promise<number>; every(ms: number, fn: () => unknown): unknown; after(ms: number, fn: () => void): { cancel(): void } };
+  // One pasted image or document of the prompt.submit in flight, in base64 slices of up to 4 MiB.
+  prompt: { media(args: { id: string; offset?: number }): Promise<PromptMedia> };
   session: { cwd(): Promise<string>; model(): Promise<string> };
 };
 
 // Who ran a command: the person's own Enter (or their bridge), or something else.
 export type Origin = { kind?: string } | undefined;
 export const isPerson = (origin: Origin): boolean => origin?.kind === "composer" || origin?.kind === "bridge";
+
+export type PromptMedia =
+  | { type: "image" | "document"; mediaType: string; base64: string; size: number; next?: number; unreadable?: undefined; deny?: undefined }
+  | { unreadable?: string; deny?: string; type?: undefined; base64?: undefined; next?: undefined };
+
+// What prompt.submit carries that the Copilot hooks read: the slash command it ran, and what was pasted with it.
+export type SubmitInput = {
+  command?: { name: string; args: string };
+  attachments?: readonly { type: string; mediaType?: string; filename?: string; id?: string }[];
+};
 
 export type CommandInput = { args?: string; origin?: Origin };
 export type CommandAnswer = { text: string };

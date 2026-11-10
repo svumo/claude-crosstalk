@@ -28,7 +28,7 @@ import {
   manualInstall, mergeBlock, norm, parseWords, planSetup, previewText, providerHost, sameFolder, savedName,
   shortcutBlock, shortcutsIn, tilde, withoutBlock,
 } from "./setup.mjs";
-import { registerCopilot, startCopilot } from "../copilot/mod/register.ts";
+import { copilotSubmit, registerCopilot, startCopilot } from "../copilot/mod/register.ts";
 import { askPermission } from "../copilot/mod/prompt.ts";
 import { personOnly } from "../copilot/protocol/render.ts";
 
@@ -125,6 +125,7 @@ export function register(on) {
       wakes = 0; // the person is here
       warned = false;
     }
+    await copilotSubmit($, e).catch(() => {});
     return next(e);
   });
 

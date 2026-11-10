@@ -2,7 +2,7 @@
 // repository. Git is run by argument list, never through a shell.
 
 import { execFile } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname } from "node:path";
 
 import { findGit } from "../context/git-exe.ts";
@@ -63,6 +63,39 @@ export async function createWorktree(mainRoot: string, root: string, taskId: str
     throw new Error(`could not make the worktree: ${added.stderr.trim().slice(0, 300)}`);
   }
   return tree;
+}
+
+// Where pictures pasted with a task go in its worktree; git ignores the folder, so they stay out of the branch.
+export const PICTURES_DIR = ".copilot-pictures";
+
+// Decodes the task's pasted pictures (base64 in `from`) into the worktree. Returns each one's path
+// relative to the worktree, for the prompt; a picture that can't be read is left out.
+export async function placePictures(tree: Worktree, from: string, names: readonly string[]): Promise<string[]> {
+  if (names.length === 0) {
+    return [];
+  }
+  const to = `${tree.path}/${PICTURES_DIR}`;
+  mkdirSync(to, { recursive: true });
+  const placed: string[] = [];
+  for (const name of names) {
+    try {
+      writeFileSync(`${to}/${name}`, Buffer.from(readFileSync(`${from}/${name}.b64`, "utf8"), "base64"));
+      placed.push(`${PICTURES_DIR}/${name}`);
+    } catch {
+      // Not saved, or unreadable: the task goes on without it.
+    }
+  }
+  // The exclude file is shared by every worktree of the repository; the line only ever names this folder.
+  const exclude = (await git(tree.path, ["rev-parse", "--path-format=absolute", "--git-path", "info/exclude"])).stdout.trim();
+  if (exclude !== "") {
+    const line = `/${PICTURES_DIR}/`;
+    const had = existsSync(exclude) ? readFileSync(exclude, "utf8") : "";
+    if (!had.split(/\r?\n/).includes(line)) {
+      mkdirSync(dirname(exclude), { recursive: true });
+      appendFileSync(exclude, `${had === "" || had.endsWith("\n") ? "" : "\n"}${line}\n`);
+    }
+  }
+  return placed;
 }
 
 // What is uncommitted in a checkout, as text to compare before and after a task.

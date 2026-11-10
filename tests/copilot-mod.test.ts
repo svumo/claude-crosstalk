@@ -14,6 +14,17 @@ const RAN_OK = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, 
 const slash = (path: string) => path.replace(/\\/g, '/')
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30))
 const say = async ($: any, args: string, origin: any = { kind: 'composer' }) => (await $.command.run({ command: 'copilot', args, origin })).text as string
+// Runs out the wait a task holds for pasted pictures, then lets its start finish.
+const wake = async (files: any) => {
+  for (const fire of files.waits.splice(0)) fire()
+  await settle()
+}
+// A task as the person sends it: the command, then its own submission with nothing pasted... or the wait running out.
+const sayTask = async ($: any, files: any, args: string) => {
+  const text = await say($, args)
+  await wake(files)
+  return text
+}
 
 // What git and node answer on this pretend computer. `git` maps the words after `-C <cwd>` to output.
 function computer(on: any, git: Record<string, string> = {}, node = 'v22.18.0') {
@@ -69,6 +80,11 @@ function computer(on: any, git: Record<string, string> = {}, node = 'v22.18.0') 
   on('clock.every', (_: any, e: any) => new Promise<any>((resolve) => {
     if (e.ms === 3000) files.tick = () => resolve({ value: undefined })
   }))
+  // The wait a /copilot task holds for its pasted pictures: fired by the test with `wake()`.
+  files.waits = [] as (() => void)[]
+  on('clock.after', (_: any, e: any) => new Promise<any>((resolve) => {
+    if (e.ms === 2500) files.waits.push(() => resolve({ value: undefined }))
+  }))
   files.set('C:/code/proj/AGENTS.md', 'rules')
   return { files, calls }
 }
@@ -122,6 +138,8 @@ test('/copilot <task> captures the session, writes the handoff and starts the si
   await $.session.start(START)
   await $.tool.call({ tool: 'Edit', file_path: 'C:\\code\\proj\\src\\login.ts', old_string: 'a', new_string: 'b' } as never).catch(() => {})
   const text = await say($, 'Fix the login page')
+  expect(calls.some((a) => a[2] === 'start')).toBe(false)
+  await wake(files)
   const started = calls.find((a) => a[0] === 'node' && a[2] === 'start')!
   expect(slash(started[1])).toMatch(/\/copilot\/sidecar\/main\.ts$/)
   expect(started.slice(4)).toEqual(['--root', BOX])
@@ -143,10 +161,30 @@ test('/copilot <task> captures the session, writes the handoff and starts the si
   expect(text).toMatch(/Your uncommitted changes \(1 file\) aren't in its worktree/)
 })
 
+// The kit can't raise the /copilot line's own submission (it leaves out `command`), so pictures
+// arriving through it are checked live; here, the waits around it.
+test('a /copilot task waits for its pictures, a prompt that is not its own submission does not start it, and a second task never waits on the first', async ($, on) => {
+  const { files, calls } = computer(on)
+  await $.session.start(START)
+  const starts = () => calls.filter((a) => a[0] === 'node' && a[2] === 'start').map((a) => a[3])
+  await say($, 'Look at this')
+  await $.prompt.submit({ text: 'something else' }).catch(() => {})
+  await settle()
+  expect(starts()).toHaveLength(0)
+  await say($, 'Second task')
+  await settle()
+  expect(starts()).toHaveLength(1)
+  await wake(files)
+  expect(starts()).toHaveLength(2)
+  const first = JSON.parse(files.get(`${BOX}/copilot/tasks/${starts()[0]}/task.json`))
+  expect(first.body.task).toBe('Look at this')
+  expect(first.body.images).toBeUndefined()
+})
+
 test('a session in a worktree hands over the main working tree as the place for Copilot\'s worktrees', async ($, on) => {
   const { files, calls } = computer(on, { 'rev-parse': 'C:/code/proj/.claude/worktrees/x\nC:/code/proj/.git\n' })
   await $.session.start(START)
-  await say($, 'Tidy up')
+  await sayTask($, files, 'Tidy up')
   const id = calls.find((a) => a[0] === 'node' && a[2] === 'start')![3]
   const { context } = JSON.parse(files.get(`${BOX}/copilot/tasks/${id}/task.json`))
   expect(context.git.main_root).toBe('C:/code/proj')

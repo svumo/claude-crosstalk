@@ -9,6 +9,7 @@
 //   <root>/copilot/tasks/<task id>/stop                 asks the sidecar to stop
 //   <root>/copilot/tasks/<task id>/mode.json            the permission mode the person switched it to
 //   <root>/copilot/tasks/<task id>/sidecar.log          the sidecar's own log
+//   <root>/copilot/tasks/<task id>/attachments/<n>.<ext>.b64  a picture pasted with the task, base64
 //   <root>/copilot/audit/<yyyy-mm-dd>.jsonl             every task, request and decision
 
 import type { Decision, Decider, Mode, TaskState, Usage } from "./schema.ts";
@@ -25,6 +26,7 @@ export type TaskPaths = {
   stop: string;
   mode: string;
   log: string;
+  attachments: string;
 };
 
 // What mode.json holds.
@@ -42,6 +44,7 @@ export function taskPaths(root: string, taskId: string): TaskPaths {
     stop: `${dir}/stop`,
     mode: `${dir}/mode.json`,
     log: `${dir}/sidecar.log`,
+    attachments: `${dir}/attachments`,
   };
 }
 

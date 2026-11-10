@@ -19,7 +19,7 @@ import { HELP, isRunning, MODE_TEXT, parseCopilot, pickTask, statusLine } from "
 import { captureContext } from "./capture.ts";
 import type { Who } from "./capture.ts";
 import { isPerson } from "./engine.ts";
-import type { Engine, On, Origin } from "./engine.ts";
+import type { Engine, On, Origin, SubmitInput } from "./engine.ts";
 import { blockBars, COPILOT_ROW_KEY, intoBand, isLive, PALETTE, pickShown, ringLabel, ringLine, ringPercent, ringSvg, taskPieces, UNAVAILABLE } from "./meter.ts";
 import type { Piece } from "./meter.ts";
 
@@ -219,16 +219,21 @@ async function handOver($: Engine, root: string, me: Who & { address: string }, 
   const { context } = captured;
   const id = taskId(task, Math.random().toString(36).slice(2));
   const paths = taskPaths(root, id);
-  const envelope = makeEnvelope<TaskBody>({
-    id: `${id}-task`, thread_id: id, from: me.address, fromId: me.id, ...(me.title ? { fromTitle: me.title } : {}), to: `copilot/${id}`,
-    sent_at: await $.clock.now(), kind: "task", body: { task_id: id, task, ...picked }, text: `Task for Copilot: ${task}`,
-    context: context as unknown as Record<string, unknown>, caps: DEFAULT_CAPS,
-  });
-  await $.fs.write(paths.task, JSON.stringify(envelope, null, 2));
-  const started = await $.process.run(["node", `${$.plugin.root}/copilot/sidecar/main.ts`, "start", id, "--root", root], { timeoutMs: 30_000 }).catch(() => null);
-  if (!started || started.exitCode !== 0) {
-    return `Couldn't start the Copilot task${started?.stderr ? `: ${started.stderr.trim().slice(0, 300)}` : "."}`;
-  }
+  const sentAt = await $.clock.now();
+  // Writes the handoff and starts the sidecar; "" when it started, else why not.
+  const launch = async (images: string[]): Promise<string> => {
+    const envelope = makeEnvelope<TaskBody>({
+      id: `${id}-task`, thread_id: id, from: me.address, fromId: me.id, ...(me.title ? { fromTitle: me.title } : {}), to: `copilot/${id}`,
+      sent_at: sentAt, kind: "task", body: { task_id: id, task, ...picked, ...(images.length > 0 ? { images } : {}) }, text: `Task for Copilot: ${task}`,
+      context: context as unknown as Record<string, unknown>, caps: DEFAULT_CAPS,
+    });
+    await $.fs.write(paths.task, JSON.stringify(envelope, null, 2));
+    const started = await $.process.run(["node", `${$.plugin.root}/copilot/sidecar/main.ts`, "start", id, "--root", root], { timeoutMs: 30_000 }).catch(() => null);
+    return started && started.exitCode === 0 ? "" : `Couldn't start Copilot task ${id}${started?.stderr ? `: ${started.stderr.trim().slice(0, 300)}` : "."}`;
+  };
+  // Pictures pasted with the command reach prompt.submit, which runs after this command has
+  // answered; so the start waits for it (copilotSubmit), or for the timer when it never comes.
+  holdLaunch($, launch, paths.attachments);
   const dirty = context.git.dirty.staged + context.git.dirty.unstaged + context.git.dirty.untracked;
   const config = await readConfig($, root);
   const mode = picked.mode ?? (isMode(config.mode) ? config.mode : "ask");
@@ -238,6 +243,92 @@ async function handOver($: Engine, root: string, me: Who & { address: string }, 
     lines.push(`Your uncommitted changes (${dirty} ${dirty === 1 ? "file" : "files"}) aren't in its worktree, which is cut from the last commit.`);
   }
   return lines.join("\n");
+}
+
+// A /copilot task waiting for the prompt.submit that follows its command, where pasted pictures
+// can be read. IMAGE_WAIT_MS is long enough for that event, short enough not to be noticed (build choice).
+const IMAGE_WAIT_MS = 2_500;
+const IMAGES_MAX = 10;
+const IMAGE_BYTES_MAX = 20 * 1024 * 1024;
+const IMAGE_EXT: Record<string, string> = { "image/png": "png", "image/jpeg": "jpg", "image/jpg": "jpg", "image/gif": "gif", "image/webp": "webp" };
+type Held = { launch: (images: string[]) => Promise<string>; dir: string; timer: { cancel(): void } | null };
+let held: Held | null = null;
+
+// Starts a held task and says so only if it failed (the command's answer already said it started).
+function release($: Engine, task: Held, images: string[]): void {
+  task.timer?.cancel();
+  void task.launch(images).then((failed) => {
+    if (failed !== "") {
+      $.ui.toast(failed);
+    } else if (images.length > 0) {
+      $.ui.toast(`Copilot got ${images.length === 1 ? "the pasted picture" : `${images.length} pasted pictures`} with the task.`);
+    }
+  }).catch((error) => $.ui.toast(`Couldn't start the Copilot task: ${error instanceof Error ? error.message : String(error)}`));
+}
+
+function holdLaunch($: Engine, launch: Held["launch"], dir: string): void {
+  if (held) {
+    const before = held;
+    held = null;
+    release($, before, []);
+  }
+  const task: Held = { launch, dir, timer: null };
+  held = task;
+  task.timer = $.clock.after(IMAGE_WAIT_MS, () => {
+    if (held === task) {
+      held = null;
+      release($, task, []);
+    }
+  });
+}
+
+// Saves each pasted picture as base64 in the task's attachments folder; the sidecar decodes it
+// into the worktree. Returns the names saved (`1.png`).
+async function savePictures($: Engine, dir: string, attachments: SubmitInput["attachments"]): Promise<string[]> {
+  const names: string[] = [];
+  let total = 0;
+  for (const item of attachments ?? []) {
+    if (item.type !== "image" || !item.id || names.length >= IMAGES_MAX) {
+      continue;
+    }
+    let base64 = "";
+    let mediaType = item.mediaType ?? "";
+    let offset: number | undefined;
+    let ok = true;
+    do {
+      const slice = await $.prompt.media({ id: item.id, ...(offset !== undefined ? { offset } : {}) }).catch(() => null);
+      if (!slice || slice.base64 === undefined) {
+        ok = false;
+        break;
+      }
+      base64 += slice.base64;
+      mediaType = slice.mediaType || mediaType;
+      total += slice.base64.length * 0.75;
+      offset = slice.next;
+    } while (offset !== undefined && total <= IMAGE_BYTES_MAX);
+    if (!ok || total > IMAGE_BYTES_MAX) {
+      continue;
+    }
+    const name = `${names.length + 1}.${IMAGE_EXT[mediaType.toLowerCase()] ?? "png"}`;
+    await $.fs.write(`${dir}/${name}.b64`, base64);
+    names.push(name);
+  }
+  return names;
+}
+
+// Called from Crosstalk's prompt.submit hook: the /copilot line's own submission carries what was
+// pasted with it. Media can only be read while that hook runs, so this waits for the reads.
+export async function copilotSubmit($: Engine, e: SubmitInput): Promise<void> {
+  if (!held || e.command?.name !== "copilot") {
+    return;
+  }
+  const task = held;
+  held = null;
+  task.timer?.cancel();
+  const images = (e.attachments ?? []).some((a) => a.type === "image")
+    ? await savePictures($, task.dir, e.attachments).catch(() => [])
+    : [];
+  release($, task, images);
 }
 
 async function decide($: Engine, root: string, sessionId: string, decision: Decision, requestId: string, named: string, origin: Origin): Promise<string> {

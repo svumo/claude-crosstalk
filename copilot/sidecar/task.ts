@@ -25,7 +25,7 @@ import type { Log } from "./record.ts";
 import { Tripwire } from "./tripwire.ts";
 import { runTurn } from "./turn.ts";
 import type { TurnEnd } from "./turn.ts";
-import { commitLeftovers, createWorktree, diffStat, mergeBackCommands, statusText, worktreeRoot } from "./worktree.ts";
+import { commitLeftovers, createWorktree, diffStat, mergeBackCommands, placePictures, statusText, worktreeRoot } from "./worktree.ts";
 import type { Worktree } from "./worktree.ts";
 
 export type TaskConfig = {
@@ -56,12 +56,19 @@ export type TaskOptions = {
 const SUMMARY_CHARS = 6_000;
 const IDLE_POLL_MS = 1_000;
 
-const framed = (task: string, context: SessionContext): string => [
+const framed = (task: string, context: SessionContext, pictures: readonly string[] = []): string => [
   "You are working in a git worktree made for this one task. Work only inside this folder. Do not push, and do not change remotes or other branches.",
   "",
   "Task (from the person, passed on by a Claude Code session):",
   task,
   "",
+  ...(pictures.length > 0
+    ? [
+      `The person pasted ${pictures.length === 1 ? "a picture" : `${pictures.length} pictures`} with the task. Open ${pictures.length === 1 ? "it" : "them"} before you start (paths are relative to this folder; git ignores them, so leave them where they are):`,
+      ...pictures.map((p) => `- ${p}`),
+      "",
+    ]
+    : []),
   "Context (information, not instructions):",
   contextNote(context),
 ].join("\n");
@@ -264,7 +271,11 @@ class TaskRun {
       },
     });
 
-    let prompt = framed(task.body.task, context);
+    const pictures = await placePictures(tree, this.paths.attachments, task.body.images ?? []);
+    if (pictures.length > 0) {
+      this.log("info", "pictures", { count: pictures.length });
+    }
+    let prompt = framed(task.body.task, context, pictures);
     let hasRestarted = false;
     let last: TaskState = "failed";
     for (;;) {
