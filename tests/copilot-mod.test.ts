@@ -185,6 +185,22 @@ test('stop asks a running task to stop, and says so of one that has ended', asyn
   expect(await say($, 'help')).toMatch(/\/copilot <task> hands the task/)
 })
 
+test('a running task is a Crosstalk peer: a session can send it a follow-up by its address', async ($, on) => {
+  const { files } = computer(on)
+  await $.session.start(START)
+  files.set(`${BOX}/sessions/copilot-fix-login-x9q2.json`, JSON.stringify({
+    id: 'copilot-fix-login-x9q2', profile: 'copilot', address: 'copilot/fix-login-x9q2', alias: 'copilot/fix-login-x9q2',
+    cwd: 'C:/code/proj-copilot/fix-login-x9q2', title: 'Copilot: Fix login', startedAt: NOW, seenAt: NOW,
+  }))
+  const sent = (await $.command.run({ command: 'crosstalk', args: 'to copilot/fix-login-x9q2 also update the changelog' })).text as string
+  expect(sent).toMatch(/^Sent to /)
+  const name = [...files.keys()].find((k: string) => k.startsWith(`${BOX}/inbox/copilot-fix-login-x9q2/`))!
+  const message = JSON.parse(files.get(name))
+  // what the sidecar checks before it runs a follow-up: who it is from
+  expect(message.fromId).toBe('self-1')
+  expect(message.text).toBe('also update the changelog')
+})
+
 test('a permission request in the inbox is shown to the person and never starts a turn', async ($, on) => {
   const { files } = computer(on)
   const submitted: string[] = []

@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+**Hand a task to GitHub Copilot CLI (Phase 1 of 5: from the command line)**
+- `/copilot <task>` hands a task to GitHub Copilot CLI. Copilot works in its own git worktree (`<repo>-copilot/<task>`) on its own branch, cut from the commit your session is on, and the result comes back as a Crosstalk message with what Copilot reported, a diff stat, the branch, and the commands to review, merge or discard it. Your own checkout is not touched.
+- Copilot asks before it writes, runs a command or uses the network. Each request shows exactly what would run or be touched; `/copilot approve`, `/copilot allow` (for the rest of the task) and `/copilot deny` answer it, and only when you type them. A request nobody answers is denied. Shell commands, the network and anything outside the worktree are always marked high risk.
+- If Copilot runs a tool without asking, Crosstalk ends it at once and says so. Copilot CLI before 1.0.105 could do that, so it is refused, and each new version must pass a small self-test before it gets a task.
+- `/copilot status` shows this session's tasks and what each has used; `/copilot stop` ends one. A task is limited to 5 prompts and 100 AI credits.
+- A task is a Crosstalk peer (`copilot/<task>`): the session that started it can send it a follow-up.
+- Needs Node.js 22.18 or newer and Copilot CLI signed in by you (`copilot login`). Crosstalk handles no tokens. See [docs/copilot.md](docs/copilot.md).
+- Messages have a version 1 format that today's sessions still read as before.
+
 ## 1.8.2
 
 - **Notification clicks work.** Windows would not run a custom link when a notification was clicked ("Get an app to open this link"), and removes a notification when the program that raised it ends. So the notification is now raised by `ToastHost.exe`, a small program `install.ps1` builds with the C# compiler that comes with Windows. It stays hidden for 15 minutes, hears the click itself, and opens that window on that session. No link or default-app entry is registered any more, and `install.ps1` removes the ones an earlier build made.
