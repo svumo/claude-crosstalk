@@ -76,13 +76,6 @@ export function credits(n: number, short = false): string {
   return whole.toLocaleString("en-US");
 }
 
-// ▰▰▱▱▱▱▱▱ for a share of 0-100, in the skins meters' style. Any use at all shows one cell.
-export function bar(percent: number, cells = 8): string {
-  const p = Math.min(100, Math.max(0, percent));
-  const full = p === 0 ? 0 : Math.max(1, Math.round((p / 100) * cells));
-  return "▰".repeat(full) + "▱".repeat(cells - full);
-}
-
 // What the meter says in words, for a line under a result or in /copilot status.
 export function quotaLine(q: Quota): string {
   if (q.unlimited) {

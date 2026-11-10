@@ -20,7 +20,7 @@ import { captureContext } from "./capture.ts";
 import type { Who } from "./capture.ts";
 import { isPerson } from "./engine.ts";
 import type { Engine, On, Origin } from "./engine.ts";
-import { isLive, meterRow, pickShown } from "./meter.ts";
+import { blockBars, CLAUDE_LABEL, intoBand, isLive, PALETTE, pickShown, ringLine, ringPercent, ringSvg, taskPieces, UNAVAILABLE } from "./meter.ts";
 import type { Piece } from "./meter.ts";
 
 // What Crosstalk hands over at session start: its shared folder, and this session as it is now.
@@ -45,6 +45,10 @@ let quotaFailed = false;
 let quotaAt = -Infinity;
 let shown: TaskStateFile | null = null;
 let tickedAt = 0;
+// The ring's last number, and when it changed: it fills in for RING_FILL_MS after a change.
+const RING_FILL_MS = 1_000;
+let ringShown = -1;
+let ringChangedAt = 0;
 
 async function readQuota($: Engine): Promise<Quota | null> {
   const ran = await $.process.run([...QUOTA_ARGV], { timeoutMs: 15_000 }).catch(() => null);
@@ -99,20 +103,49 @@ export function registerCopilot(on: On): void {
   // order mods load in does not matter.
   on("ui.render", { component: "AbovePrompt" }, async ($, e, next) => {
     const theirs = await next(e);
-    if (e.props?.hasSurvey) {
-      return theirs;
+    if (e.props?.hasSurvey || (!quota && !quotaFailed && !shown)) {
+      return e.surface === "terminal" ? blockBars(theirs) : theirs;
     }
-    const row = meterRow(quota, quotaFailed, shown, tickedAt, e.props?.bodyColumns ?? 80);
-    if (!row) {
-      return theirs;
-    }
-    const { Box, Text } = $.ui.resolve(e);
-    const side = (pieces: Piece[]) => Box({
+    const ui = $.ui.resolve(e);
+    const { Box, Text } = ui;
+    const pieces = (list: Piece[]) => Box({
       flexDirection: "row", columnGap: 1, flexShrink: 0,
-      children: pieces.map((p) => Text({ color: p.color, bold: p.bold === true, children: p.text })),
+      children: list.map((p) => Text({ color: p.color, bold: p.bold === true, children: p.text })),
     });
-    const mine = Box({ paddingX: 1, flexDirection: "row", columnGap: 4, children: row.right.length > 0 ? [side(row.left), side(row.right)] : [side(row.left)] });
-    return theirs ? Box({ flexDirection: "column", children: [theirs, mine] }) : mine;
+    const mine: unknown[] = [];
+    if (quota) {
+      const percent = Math.round(ringPercent(quota));
+      const now = await $.clock.now();
+      if (percent !== ringShown) {
+        ringShown = percent;
+        ringChangedAt = now;
+      }
+      // Fills in when it first draws and when the number moves, like skins' rings; settled between.
+      const animate = now - ringChangedAt < RING_FILL_MS;
+      // The terminal draws Svg as nothing, so it gets skins' text meter there.
+      if (e.surface !== "terminal" && ui.Svg) {
+        const ring = ringSvg(percent, "copilot", animate);
+        mine.push(ui.Svg({ key: "usage-copilot", source: ring.source, alt: ring.alt, width: ring.width, height: ring.height }));
+      } else {
+        const line = ringLine(percent, "copilot");
+        mine.push(Text({ color: PALETTE.muted, children: [Text({ color: line.color, children: line.bar }), ` ${line.text}`] }));
+      }
+    } else if (quotaFailed) {
+      mine.push(pieces([UNAVAILABLE]));
+    }
+    if (shown) {
+      mine.push(pieces(taskPieces(shown, tickedAt, e.props?.bodyColumns ?? 80)));
+    }
+    // Among skins' context / 5h / 7d rings when its band is drawn; else a row of its own.
+    // A `claude` label leads skins' rings, so the two accounts' meters read apart. In the
+    // terminal skins' bars are redrawn in the same blocks as Copilot's.
+    const base = e.surface === "terminal" ? blockBars(theirs) : theirs;
+    const joined = intoBand(base, mine,[Text({ color: CLAUDE_LABEL, bold: true, children: "claude" })]);
+    if (joined.joined) {
+      return joined.node;
+    }
+    const row = Box({ paddingX: 1, flexDirection: "row", alignItems: "center", columnGap: 3, children: mine });
+    return base ? Box({ flexDirection: "column", children: [base, row] }) : row;
   });
 }
 
@@ -128,6 +161,7 @@ export async function startCopilot($: Engine, given: Host): Promise<void> {
   quotaFailed = false;
   quotaAt = -Infinity;
   shown = null;
+  ringShown = -1;
   $.clock.every(TICK_MS, () => tick($).catch(() => {}));
   void tick($, true).catch(() => {});
 }

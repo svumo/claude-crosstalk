@@ -53,6 +53,7 @@ function computer(on: any, git: Record<string, string> = {}, node = 'v22.18.0') 
   on('process.run', (_: any, e: any) => {
     calls.push(e.argv)
     if (e.argv[0] === 'node' && e.argv[1] === '--version') return { value: node === '' ? { ...RAN_OK, exitCode: 1 } : { ...RAN_OK, stdout: `${node}\n` } }
+    if (e.argv[0] === 'gh' && files.gh) return { value: { ...RAN_OK, stdout: files.gh } }
     if (e.argv[0] === 'git') {
       const answer = answers[e.argv[3]]
       return { value: answer === undefined || answer === 'FAIL' ? { ...RAN_OK, exitCode: 128 } : { ...RAN_OK, stdout: answer } }
@@ -224,4 +225,38 @@ test('a permission request in the inbox is shown to the person and never starts 
   expect(files.toasts.at(-1)).toMatch(/Copilot is waiting for your answer: \/copilot approve r1/)
   expect(files.logs.at(-1)).toContain('npm test')
   expect(JSON.parse(files.get(`${BOX}/inbox/self-1/_delivered.json`))).toEqual(['000000001000000-a.json'])
+})
+
+// The skins band as the engine hands it on: meters spread across the row, then Compact.
+const skinsBand = () => ({
+  type: 'Box', props: { flexDirection: 'row', alignItems: 'center', columnGap: 2, paddingRight: 5 },
+  children: [
+    { type: 'Box', props: { flexDirection: 'row', alignItems: 'center', columnGap: 3, justifyContent: 'space-evenly', flexGrow: 1 }, children: [{ type: 'Text', props: {}, children: ['42% context'] }, { type: 'Text', props: { color: '#8be9fd' }, children: ['▰▰▰▱▱▱▱▱'] }] },
+    { type: 'Text', props: {}, children: ['Compact'] },
+  ],
+})
+const QUOTA_ANSWER = JSON.stringify({ copilot_plan: 'business', quota_reset_date: '2026-12-01', quota_snapshots: { premium_interactions: { credits_used: 5642, entitlement: 50000, quota_remaining: 44358, percent_remaining: 88.7, unlimited: false } } })
+const mountBand = ($: any, surface: string) => $.ui.mount({
+  plugin: 'crosstalk', component: 'AbovePrompt', requestId: 'band', surface, viewport: { columns: 140, rows: 30 },
+  props: { hasSurvey: false, isWorking: false, maxRows: 6, bodyColumns: 140, scroll: { offset: 0, bodyRows: 6 }, view: {} },
+} as never)
+
+test('the copilot ring joins the skins meters, with claude leading them', async ($, on) => {
+  const { files } = computer(on)
+  files.gh = QUOTA_ANSWER
+  on('ui.render', () => skinsBand())
+  await $.session.start(START)
+  await settle()
+  const desktop = await mountBand($, 'desktop')
+  expect(await desktop.find({ type: 'Text', text: 'claude' })).toBeDefined()
+  expect(await desktop.find({ type: 'Text', text: '42% context' })).toBeDefined()
+  expect(await desktop.find({ type: 'Svg' })).toBeDefined()
+  await desktop.unmount()
+  // The terminal draws Svg as nothing, so it gets block meters, skins' own redrawn to match.
+  const terminal = await mountBand($, 'terminal')
+  expect(await terminal.find({ type: 'Text', text: '█░░░░░░░' })).toBeDefined()
+  expect(await terminal.find({ type: 'Text', text: '███░░░░░' })).toBeDefined()
+  expect(await terminal.find({ type: 'Text', text: '▰▰▰▱▱▱▱▱' })).toBeUndefined()
+  expect(await terminal.find({ type: 'Text', text: 'claude' })).toBeDefined()
+  await terminal.unmount()
 })

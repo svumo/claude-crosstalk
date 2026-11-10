@@ -10,7 +10,7 @@ export type Engine = {
     toast(text: string): void;
     log(text: string): void;
     invalidate(event: string): void;
-    resolve(e: unknown): { Box: (props: Record<string, unknown>) => unknown; Text: (props: Record<string, unknown>) => unknown };
+    resolve(e: unknown): { Box: (props: Record<string, unknown>) => unknown; Text: (props: Record<string, unknown>) => unknown; Svg?: (props: Record<string, unknown>) => unknown };
   };
   command: { register(spec: { name: string; description: string; argumentHint?: string }): Promise<unknown> };
   fs: {
@@ -41,4 +41,4 @@ export type On = {
   (event: "ui.render", matcher: { component: string }, hook: Hook<RenderInput, unknown>): unknown;
 };
 
-export type RenderInput = { props?: { bodyColumns?: number; hasSurvey?: boolean } };
+export type RenderInput = { surface?: string; props?: { bodyColumns?: number; hasSurvey?: boolean } };
