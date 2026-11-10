@@ -13,6 +13,8 @@
 - Needs Node.js 22.18 or newer and Copilot signed in by you (`copilot login`). Crosstalk handles no tokens. See [docs/copilot.md](docs/copilot.md).
 - Messages have a version 1 format that today's sessions still read as before.
 - **Fix:** when Crosstalk reloaded mid-turn (an update installed into a running session), a message the session had already had could reach the model again. The session went live before it read which messages it had had; it now reads that first.
+- **Fix:** clicking a notification switched the window to its session but left the window behind whatever you were in, as Windows won't let the app bring itself forward from a background launch. ToastHost, the program you clicked, now brings the window forward first. It logs each click's outcome to `toast-host.log`.
+- **Fix:** notifications lost the Claude logo when the app updated, since their shortcuts pointed into the old version's folder. The logo is now kept in Crosstalk's own folder (`app-windows\claude-logo.png` and `.ico`), copied again whenever the app updates, and shown beside the notification's text as well.
 
 ## 1.8.2
 
