@@ -151,19 +151,21 @@ export function registerCopilot(on: On): void {
     } else if (quotaFailed) {
       mine.push(pieces([UNAVAILABLE]));
     }
-    if (shown) {
-      mine.push(pieces(taskPieces(shown, tickedAt, e.props?.bodyColumns ?? 80)));
-    }
-    // Among skins' context / 5h / 7d rings when its band is drawn; else a row of its own. In the
-    // terminal skins' bars are redrawn in the same blocks as Copilot's.
+    const taskRow = shown
+      ? Box({ key: `${COPILOT_ROW_KEY}-task`, paddingX: 1, flexDirection: "row", alignItems: "center", children: [pieces(taskPieces(shown, tickedAt, e.props?.bodyColumns ?? 80))] })
+      : null;
+    // Among skins' context / 5h / 7d rings when its band is drawn, the task on a row under them
+    // (never beside Compact); else rows of its own. In the terminal skins' bars are redrawn in the
+    // same blocks as Copilot's.
     const base = e.surface === "terminal" ? blockBars(theirs) : theirs;
-    const joined = intoBand(base, mine);
+    const joined = intoBand(base, mine, [], taskRow);
     if (joined.joined) {
       return joined.node;
     }
     // Keyed, so a mod drawn around this one (token-ledger) can lift it into the skins band when
     // skins draws its band after this hook and the join above found nothing.
-    const row = Box({ key: COPILOT_ROW_KEY, paddingX: 1, flexDirection: "row", alignItems: "center", columnGap: 3, children: mine });
+    const rings = mine.length > 0 ? Box({ paddingX: 1, flexDirection: "row", alignItems: "center", columnGap: 3, children: mine }) : null;
+    const row = Box({ key: COPILOT_ROW_KEY, flexDirection: "column", children: [rings, taskRow].filter((x) => x !== null) });
     return base ? Box({ flexDirection: "column", children: [base, row] }) : row;
   });
 }

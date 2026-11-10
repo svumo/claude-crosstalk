@@ -380,6 +380,26 @@ test('the copilot ring joins the skins meters, after them, with no label in fron
   await terminal.unmount()
 })
 
+test('the copilot task sits on its own row under the rings, never beside Compact', async ($, on) => {
+  const { files } = computer(on)
+  files.gh = QUOTA_ANSWER
+  putState(files, stateOf({ state: 'completed', pending: [] }))
+  on('ui.render', () => skinsBand())
+  await $.session.start(START)
+  await settle()
+  for (const surface of ['desktop', 'terminal']) {
+    const m = await mountBand($, surface)
+    const task = await m.find({ type: 'Text', text: '✓' })
+    expect(task).toBeDefined()
+    const band: any = await m.find({ type: 'Box', props: { flexDirection: 'column' } } as never)
+    const [compactRow, taskRow] = band.children.map((c: unknown) => JSON.stringify(c))
+    expect(compactRow).toContain('Compact')
+    expect(compactRow).not.toContain('✓')
+    expect(taskRow).toContain('✓')
+    await m.unmount()
+  }
+})
+
 test('the copilot ring names the model new tasks use, from config.json', async ($, on) => {
   const { files } = computer(on)
   files.gh = QUOTA_ANSWER
