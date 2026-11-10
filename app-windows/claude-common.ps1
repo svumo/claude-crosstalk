@@ -15,6 +15,64 @@ function Find-ClaudeExe {
     return $null
 }
 
+# The Claude logo for notifications, kept in this folder as claude-logo.png and claude-logo.ico, so
+# it outlives app updates (the Store app moves to a new versioned folder on every update, and a
+# shortcut icon pointing into the old one shows nothing). The Store package's 256px asset is copied;
+# the standard installer's copy has none, so its exe's icon is used. Returns the two paths, or
+# $null when no logo could be had. Rewritten only when the app's version changed.
+function Update-ClaudeLogo([string]$Dir) {
+    $png = Join-Path $Dir 'claude-logo.png'
+    $ico = Join-Path $Dir 'claude-logo.ico'
+    $stamp = Join-Path $Dir 'claude-logo.from'
+    $exe = Find-ClaudeExe
+    if (-not $exe) { return $(if (Test-Path -LiteralPath $ico) { @{ Png = $png; Ico = $ico } } else { $null }) }
+    if ((Test-Path -LiteralPath $ico) -and (Test-Path -LiteralPath $png) -and (Test-Path -LiteralPath $stamp) -and ((Get-Content -LiteralPath $stamp -Raw).Trim() -eq $exe)) {
+        return @{ Png = $png; Ico = $ico }
+    }
+    try {
+        $asset = Join-Path (Split-Path (Split-Path $exe)) 'assets\Square44x44Logo.targetsize-256_altform-unplated.png'
+        if (Test-Path -LiteralPath $asset) {
+            Copy-Item -LiteralPath $asset -Destination $png -Force
+        } else {
+            Add-Type -AssemblyName System.Drawing
+            $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($exe)
+            $icon.ToBitmap().Save($png, [System.Drawing.Imaging.ImageFormat]::Png)
+        }
+        # An .ico holding the PNG as is (Windows Vista and later read PNG-in-ICO): one 256px entry.
+        $bytes = [System.IO.File]::ReadAllBytes($png)
+        $out = New-Object System.IO.MemoryStream
+        $w = New-Object System.IO.BinaryWriter($out)
+        $w.Write([uint16]0); $w.Write([uint16]1); $w.Write([uint16]1)
+        $w.Write([byte]0); $w.Write([byte]0); $w.Write([byte]0); $w.Write([byte]0)
+        $w.Write([uint16]1); $w.Write([uint16]32); $w.Write([uint32]$bytes.Length); $w.Write([uint32]22)
+        $w.Write($bytes); $w.Flush()
+        [System.IO.File]::WriteAllBytes($ico, $out.ToArray())
+        Set-Content -LiteralPath $stamp -Value $exe -NoNewline
+        return @{ Png = $png; Ico = $ico }
+    } catch {
+        return $(if (Test-Path -LiteralPath $ico) { @{ Png = $png; Ico = $ico } } else { $null })
+    }
+}
+
+# Points a window's notification identity at the kept logo: the Start-menu shortcut's icon and the
+# registered IconUri. Only writes what is out of date.
+function Set-NotifyLogo([string]$Window, [hashtable]$Logo) {
+    if (-not $Logo) { return }
+    $lnk = Join-Path ([Environment]::GetFolderPath('Programs')) "Claude ($Window).lnk"
+    if (Test-Path -LiteralPath $lnk) {
+        $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+        if ($sc.IconLocation -ne "$($Logo.Ico),0") {
+            $sc.IconLocation = "$($Logo.Ico),0"
+            $sc.Save()
+            Set-ShortcutAppId $lnk "Crosstalk.Claude.$Window"
+        }
+    }
+    $k = "HKCU:\Software\Classes\AppUserModelId\Crosstalk.Claude.$Window"
+    if ((Test-Path $k) -and (Get-ItemProperty $k -ErrorAction SilentlyContinue).IconUri -ne $Logo.Png) {
+        New-ItemProperty -Path $k -Name IconUri -Value $Logo.Png -Force | Out-Null
+    }
+}
+
 # True for the desktop app's own process path. Claude Code's CLI (~\.local\bin) and the copies the
 # app runs for its sessions (<data folder>\claude-code\...) are also called claude.exe; they aren't it.
 function Test-DesktopAppPath([string]$Path) {

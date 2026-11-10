@@ -48,6 +48,9 @@ if (-not $NoLink -and $PSCmdlet.ShouldProcess($dest, 'Set up notifications that 
 
     $exe = Find-ClaudeExe
     $menu = [Environment]::GetFolderPath('Programs')
+    # The Claude logo, kept here so notifications still show it after the app updates.
+    $logo = Update-ClaudeLogo $dest
+    if (-not $logo) { Write-Warning "Couldn't copy the Claude logo, so notifications may show no icon." }
     foreach ($d in Get-ChildItem -LiteralPath $env:USERPROFILE -Directory -Force | Where-Object { $_.Name -match '^\.claude-(.+)-app$' }) {
         $win = ($d.Name -replace '^\.claude-', '' -replace '-app$', '').ToLowerInvariant()
         if ($win -notmatch '^[a-z0-9][a-z0-9_-]{0,30}$') { continue }
@@ -68,6 +71,7 @@ if (-not $NoLink -and $PSCmdlet.ShouldProcess($dest, 'Set up notifications that 
             "Shortcut: $lnk"
         }
         Set-ShortcutAppId $lnk "Crosstalk.Claude.$win"
+        Set-NotifyLogo $win $logo
         "Notifications: $win"
     }
 }

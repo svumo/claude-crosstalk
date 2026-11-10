@@ -39,11 +39,21 @@ if (-not $Force) {
     if ($proc -and (Get-CimInstance Win32_Process -Filter "ProcessId=$fgPid" -ErrorAction SilentlyContinue).ParentProcessId -eq $proc.ProcessId) { exit 0 }
 }
 
+# The Claude logo on the notification: re-copied when the app has updated, as each update moves it
+# to a new folder and leaves the old icon path empty.
+$logo = $null
+try { $logo = Update-ClaudeLogo $PSScriptRoot; Set-NotifyLogo $Window $logo } catch { }
+
+# The window to bring forward when it's clicked: its main process, which owns the app's windows.
+$windowPid = 0
+$target = Get-ClaudeWindowProcess $Window
+if ($target) { $windowPid = $target.ProcessId }
+
 # One notification per session at a time: a new one replaces the older host for that session.
 Get-CimInstance Win32_Process -Filter "Name='ToastHost.exe'" -ErrorAction SilentlyContinue |
     Where-Object { $_.CommandLine -like "*$Session*" } |
     ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
 
 $q = { param($s) '"' + ($s -replace '"', "'") + '"' }
-$argList = @($Window, $Session, (& $q $Title), (& $q $Body), "$WaitMinutes", (& $q (Join-Path $PSScriptRoot 'claude-open-link.ps1')))
+$argList = @($Window, $Session, (& $q $Title), (& $q $Body), "$WaitMinutes", (& $q (Join-Path $PSScriptRoot 'claude-open-link.ps1')), "$windowPid", (& $q $(if ($logo) { $logo.Png } else { '' })))
 Start-Process -FilePath $exe -ArgumentList $argList -WindowStyle Hidden
