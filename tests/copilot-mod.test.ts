@@ -11,7 +11,9 @@ const BOX = 'C:/home/.claude-crosstalk'
 const SHA = '0123456789abcdef0123456789abcdef01234567'
 const START = { cwd: 'C:\\code\\proj', surface: 'terminal', isInteractive: true } as const
 const RAN_OK = { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
-const slash = (path: string) => path.replace(/\\/g, '/')
+// On macOS and Linux a Windows path isn't absolute, so the host puts the working folder in front
+// of it: that part is dropped, as in crosstalk.test.ts.
+const slash = (path: string) => path.replace(/\\/g, '/').replace(/^.*?(?=(?<![A-Za-z])[A-Za-z]:\/)/, '')
 const settle = () => new Promise((resolve) => setTimeout(resolve, 30))
 const say = async ($: any, args: string, origin: any = { kind: 'composer' }) => (await $.command.run({ command: 'crosstalk-gh', args, origin })).text as string
 // Runs out the wait a task holds for pasted pictures, then lets its start finish.

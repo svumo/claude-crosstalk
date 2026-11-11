@@ -87,3 +87,5 @@ Check 'claude-toast.ps1 refuses a bad session id' (Fails { & pwsh -NoProfile -Fi
 
 if ($failed) { "$failed failed"; exit 1 }
 'All passed'
+# The refusal checks above leave $LASTEXITCODE at 1, which would otherwise be the script's exit code.
+exit 0
