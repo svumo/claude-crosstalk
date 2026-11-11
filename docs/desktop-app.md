@@ -19,6 +19,14 @@ Do this whichever option you pick.
 2. Sign in to each profile once from a terminal (`claude-<name>`, or however you start it), so each has its own login.
 3. Restart any session that was already open. Sessions load the plugin only when they start.
 
+## Where `open` goes from the app
+
+On Windows, a session in the app opens other profiles **in their own app window** (option B below), not in a tab. `/crosstalk open fuuk review the diff` starts a Code session in fuuk's window and sends the message. `default` is the main window. If a profile has no window yet, Crosstalk says so; `--in panel` uses a Terminal-panel tab instead (option A). On macOS and Linux the app has one window, so `open` uses a Terminal-panel tab.
+
+## Notifications that open the right window
+
+The app's notifications all belong to one app identity, so on Windows clicking one opens the main window's last session, whichever window raised it. For sessions in an account window, Crosstalk raises its own notification (finished, needs approval, has a question, has a plan). Clicking it opens that window on that session. `/crosstalk setup yes` installs it for this user only: it builds a small helper program (`ToastHost.exe`, with the C# compiler that comes with Windows) that stays hidden for 15 minutes per notification to hear the click. `app-windows\install.ps1 -Uninstall` removes the notification names. Each click is logged in `open-link.log` in Crosstalk's folder. To avoid doubles, set that window's own notification settings to off or badge. The main window keeps the app's own.
+
 ## A. Terminal-panel tab (no extra setup)
 
 In a desktop-app session, say:
@@ -34,6 +42,8 @@ Crosstalk types the profile's launch command into a **new tab of the app's Termi
 What has to be true:
 - **The launch command works in your shell.** The panel runs your normal PowerShell (or login shell on macOS) with your profile loaded. The default command is `claude-<profile>`. If you start profiles another way, tell Crosstalk once: `/crosstalk launch work claude work`.
 - **The command is a plain one-liner.** The app's Terminal tool won't type variables, pipes or `$( )`. Wrap anything fancier in a function in your shell profile and launch that.
+
+**Which account.** A profile you name always wins. With none (`/crosstalk open`, or "open a different session"), it opens this session's own profile, the account you're working in. A Terminal-panel tab can run one account inside another account's window, such as a `mikey` session in a tab of the `fuuk` window. Crosstalk finds the window from the session's parent processes, so `list` says "in the fuuk app window". `/crosstalk open window` opens that window's account. If Crosstalk can't tell the window, it says so and doesn't guess. Set `CLAUDE_CROSSTALK_WINDOW` to override it.
 
 To see what `open` will do from a session, run `/crosstalk open-in`. To go back to separate terminal windows, use `/crosstalk open-in window`.
 
@@ -87,13 +97,13 @@ From any session (or your own PowerShell):
 & "$env:USERPROFILE\.claude-crosstalk\app-windows\claude-new-session.ps1" work "C:\code\my-app" "Review the open PR and list problems" -Send
 ```
 
-This opens a new Code session in the `work` window, in that folder, with the prompt typed in. `-Send` presses Send for you through Windows UI Automation. It doesn't use the mouse or keyboard and doesn't take screenshots. If the app asks "Trust this workspace?" for exactly that folder, the script answers it. A dialog for any other folder is left for you. Use `default` instead of `work` for your main window.
+This opens a new Code session in the `work` window, in that folder, with the prompt typed in. `-Send` presses Send for you through Windows UI Automation. It doesn't use the mouse or keyboard and doesn't take screenshots. If the app asks "Trust this workspace?" for exactly that folder, the script answers it. A dialog for any other folder is left for you. Use `default` instead of `work` for your main window. Use `here` for the window you're working in: the app window the calling session runs in (a Terminal-panel tab counts as its window's), or, outside the app, the window of that session's own profile. Add `-DryRun` to see which window it would use, and why, without opening anything.
 
 Prompts can't start with `/`, because the app disables a leading slash that comes by link. The script rewrites `/skill args` as "Use the skill skill: args", which has the same effect.
 
 ### Move a chat to another account
 
-In any session, say "move this to work" (or `default` to come back). The `move-chat` skill writes a handoff file to `~\.claude-crosstalk\handoffs\`, opens a session on that account pointed at it, presses Send, and checks with Crosstalk that it started. It's handy when one account is near its usage limit.
+In any session, say "move this to work" (or `default` to come back). Say "use a different session" with no account, and it opens in the window you're in (`here`). The `move-chat` skill writes a handoff file to `~\.claude-crosstalk\handoffs\`, opens a session on that account pointed at it, presses Send, and checks with Crosstalk that it started. It's handy when one account is near its usage limit.
 
 ### How the pieces fit
 
@@ -104,7 +114,7 @@ In any session, say "move this to work" (or `default` to come back). The `move-c
 | Script | What it does |
 |---|---|
 | `claude-app.ps1 <profile> [claude://link]` | Starts that profile's window, or brings it up, and can pass it a `claude://` link |
-| `claude-new-session.ps1 <profile> "<folder>" "<prompt>" [-Send]` | Opens a new Code session in that window with the folder and prompt filled in |
+| `claude-new-session.ps1 <profile or here> "<folder>" "<prompt>" [-Send] [-DryRun]` | Opens a new Code session in that window with the folder and prompt filled in |
 | `claude-press-send.ps1 <profile> [-Expect text] [-Folder path]` | Presses Send in that window, and answers the trust prompt for `-Folder` only |
 | `install.ps1 [-Shortcuts names] [-WhatIf]` | Installs the scripts and the skill, and makes shortcuts |
 

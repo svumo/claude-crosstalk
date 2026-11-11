@@ -23,6 +23,7 @@
   <a href="#multiple-claude-accounts">Multiple accounts</a> ·
   <a href="#what-it-works-with">Providers</a> ·
   <a href="#how-it-works">How it works</a> ·
+  <a href="#handing-work-to-github-copilot-cli">Copilot</a> ·
   <a href="#costs-and-safety">Costs and safety</a>
 </p>
 
@@ -79,10 +80,18 @@ Just ask, in plain words:
 | `/crosstalk setup` | Shows your profiles and what setup would do. Changes nothing |
 | `/crosstalk setup yes` | Does it |
 | `/crosstalk add <name>` | Makes a new profile, ready to log in to |
-| `/crosstalk open <profile> [--model m] [--mode p] [message]` | Starts a session on that profile in a new terminal, in this folder, and sends it your message once it's up. `--model` and `--mode` set its model and permission mode |
-| `/crosstalk open-in auto\|app\|vscode\|window` | Where `open` starts it. `auto` is a tab in the Claude desktop app's Terminal panel when you're in the app, an editor tab when you're in VS Code or VSCodium, else a new window. On its own, `/crosstalk open-in` says what `open` will do from this session and why |
+| `/crosstalk <profile> [message]` | Starts a session on that profile where you are, in this folder, and sends it your message once it's up. Same as `open` |
+| `/crosstalk open [profile] [--model m] [--mode p] [--in app\|panel\|editor\|window] [message]` | The long form. With no profile, it uses this session's own. `window` uses the account of the desktop-app window this session runs in. `--model` and `--mode` set its model and permission mode, `--in` where it opens |
+| `/crosstalk to <who> <message>` | Sends a message to a running session, without a model turn |
+| `/crosstalk where [auto\|app\|panel\|editor\|window]` | Where `open` starts a session. `auto` is the profile's own window in the Claude desktop app, an editor tab in VS Code or VSCodium, a tab of the Windows Terminal window you're in, else a new window. On its own it says what `open` will do from this session and why (`open-in` still works) |
+| `/crosstalk help` | Lists every command |
 | `/crosstalk editor auto\|code\|codium` | Which editor the tab opens in. `auto` spots VS Code or VSCodium from the terminal this session runs in |
 | `/crosstalk launch <profile> <command>` | The command that starts a profile, such as `claude zai`. Default: `claude-<profile>` |
+| `/crosstalk usage` | Each account's last known usage, and where this session stops and why (see Usage guard) |
+| `/crosstalk usage <1-100\|off>` | Where every session on an account stops. Default: 93 |
+| `/crosstalk usage here <1-100\|off>` | This session alone stops earlier, such as 80 for a big session |
+| `/crosstalk usage large <1-100\|off> [context %]` | Where a session with a full context stops. Default: 85 once its context is 60% full |
+| `/crosstalk move <profile>` | Hands this session to another account now: compacts it, writes a handoff and opens the profile on it |
 
 Every message that arrives is also shown to you in the transcript, as `Crosstalk ← sender`, so you don't have to ask whether anyone replied.
 
@@ -90,7 +99,7 @@ Every message that arrives is also shown to you in the transcript, as `Crosstalk
 
 Crosstalk works in the desktop app's Code tab the same way as in a terminal. The app signs in to one account at a time, so there are two ways to add sessions on your other accounts:
 
-- **A tab in the app's Terminal panel (no setup).** From a session in the app, `/crosstalk open mikey` (or "open a session on my mikey account and ask it to review this") starts that profile in a new tab of the app's **Terminal panel**. It runs inside the app on that profile's own login and subscription. Crosstalk uses the app's own Terminal tool, and the app asks you to approve the command. The panel's shell is your PowerShell (or login shell) with your profile loaded, so launch commands such as `claude mikey` work there. `/crosstalk open-in window` goes back to a separate terminal window.
+- **A tab in the app's Terminal panel (no setup).** From a session in the app, `/crosstalk open mikey` (or "open a session on my mikey account and ask it to review this") starts that profile in a new tab of the app's **Terminal panel**. It runs inside the app on that profile's own login and subscription. Crosstalk uses the app's own Terminal tool, and the app asks you to approve the command. The panel's shell is your PowerShell (or login shell) with your profile loaded, so launch commands such as `claude mikey` work there. `/crosstalk open-in window` goes back to a separate terminal window. Ask for "a different session" without naming an account, and it stays on the account you're in. `list` shows which app window each session runs in, and `/crosstalk open window` opens that window's account.
 - **A second app window per account (Windows, one-time setup).** Scripts in [`app-windows/`](app-windows/) run another copy of the app signed in to another account, with its own sidebar and sessions. They can start a session in that window with the folder and prompt filled in, and a `move-chat` skill moves a whole chat across. Run `app-windows\install.ps1` once, then sign in to the new window with the emailed code.
 
 The [desktop app guide](docs/desktop-app.md) covers both: setup, sign-in, limits and troubleshooting.
@@ -254,7 +263,47 @@ Each session records that it's running and checks its own inbox. When a message 
 - **If it's working,** the model reads the message on its next step, once the current tool calls finish.
 - **If it's in one long step with no tools,** the message arrives when that turn ends.
 
+## Usage guard
+
+When an account gets close to its usage limit, every session on it would otherwise keep going until it hits the limit mid-task. Crosstalk stops them first, at 93% of any limit (the 5-hour or weekly window, or a gateway spend limit). It never triggers on an API key or a non-Claude provider, since those report no limits.
+
+For each session on that account, Crosstalk:
+
+1. Holds its wake-ups, so no message starts a turn while it's over the limit. Messages wait in its inbox.
+2. Stops the turn it's running, if any.
+3. Writes `handoffs/<date>-<address>.md` in the shared folder, with the folder, the account, the transcript path and a digest cut from the transcript on disk (the first request, the latest few, and the last assistant message). No model call is made, so it costs no usage. Set `usageCompact: true` in `setup.json` to have the model write a `/compact`-style summary instead. A desktop notification goes out too. A session nothing was typed in gets no handoff.
+4. Asks once whether to move the session to the other profile with the lowest known usage, or Not now. You can type any other profile name under Other. If you accept, that profile opens in the same folder (as a new tab of your Windows Terminal window when you are in one) and is told to read the handoff and carry on.
+
+The first session to see 93% writes `usage/<profile>.json` to the shared folder. Every other session on that profile, or on the same account under another profile name, checks for it every 3 seconds, so idle sessions stop too. Each session acts once per window. "Not now" holds until the window resets.
+
+**Moving big sessions earlier.** A session with a lot of context needs room to compact and hand off, so it stops before the rest:
+
+- A session whose context is 60% full or more stops at 85%. Change it with `/crosstalk usage large <n> [context %]`, or turn it off with `off`.
+- `/crosstalk usage here 80` stops this one session at 80%. It's kept in the session's record, so it survives a reload.
+- `/crosstalk move <profile>` moves a session right away, at any usage.
+
+A session that stops early stops alone. It doesn't tell the rest of the account to stop.
+
+**Who reports back to whom.** A moved session is told whether to report back:
+
+- If the old session stopped near its limit (the guard's own move, or `/crosstalk move` while over), the new one is told it owns the work alone. It shouldn't message the old one, which is paused and may not have enough usage left to answer, and it should ask you in its own chat if it gets stuck.
+- If the old session still has plenty of usage (a `/crosstalk move` well under the limit), the new one messages it only if it gets blocked or when it's done.
+- The `send` tool still delivers a message to a session that's paused for usage. Its reply says that session won't answer before its limit resets and suggests asking you instead. `list` marks such sessions "paused near its usage limit", and its first line shows this session's own usage. The `move-chat` skill uses that line to choose the same wording.
+
+## Handing work to GitHub Copilot CLI
+
+`/crosstalk-gh <task>` hands a task from a Claude session to GitHub Copilot CLI. Copilot works in its own git worktree and branch, cut from the commit you're on, so your checkout isn't touched, and the result comes back as a Crosstalk message with a diff stat, the branch and the commands to review, merge or discard it.
+
+- Copilot asks before it writes, runs a command or uses the network. Requests pop up in Claude Code's question dialog; `ask`, `auto` and `bypass` modes set how much goes through without asking.
+- `/crosstalk-gh open` watches a task live in a terminal and answers its requests with a key.
+- A purple `gh` ring among the skins meters shows the account's monthly Copilot AI credits.
+- Claude can run every `/crosstalk-gh` command itself, through the `crosstalk_gh` tool.
+
+It needs Node.js 22.18 or newer and Copilot signed in by you (`copilot login`); then run `/crosstalk-gh setup` once. Crosstalk handles no tokens. The full guide is [docs/copilot.md](docs/copilot.md).
+
 ## Costs and safety
+
+- **The usage guard costs nothing by default.** The handoff is cut from the transcript without a model call. Only with `usageCompact: true` does it make one summary request on the nearly spent account.
 
 - **Wake-ups use tokens.** Each message that wakes a session uses that profile's tokens or usage. After 25 wake-ups in a row, new messages wait until you type, so two sessions can't keep replying to each other forever. To change the number, set `CLAUDE_CROSSTALK_WAKE_LIMIT`.
 - **Messages are plain text on disk,** so don't send passwords or keys.
@@ -297,11 +346,13 @@ Optional environment variables, set before you start a session:
 | `CLAUDE_CROSSTALK_DIR` | The shared folder. Set the same on every profile | `~/.claude-crosstalk` |
 | `CLAUDE_CROSSTALK_WAKE_LIMIT` | Wake-ups in a row before messages wait for you | 25 |
 | `CLAUDE_CROSSTALK_OPEN_IN` | Where `/crosstalk open` starts a session (`auto`, `app`, `vscode`, `window`), over the saved setting | `auto` |
+| `CLAUDE_CROSSTALK_WINDOW` | The desktop-app window this session counts as running in, for `list` and `open window`, over finding it from its parent processes (Windows) | Found |
 | `CLAUDE_CROSSTALK_EDITOR` | Which editor `open` uses for the new terminal tab (`code` or `codium`), over `/crosstalk editor` and spotting it | `auto` |
 | `CLAUDE_CROSSTALK_TERMINAL` | On Linux, the terminal `open` tries first, such as `kitty` or `tmux` | The first one found |
 | `CLAUDE_CROSSTALK_APP_DATA` | The Claude desktop app's data folder, if a desktop-app session's title isn't found where Crosstalk looks | The app copy that started the session, `~/.claude-<profile>-app`, then the standard folders |
+| `CLAUDE_CROSSTALK_USAGE_STOP` | Where sessions stop near a usage limit (1-100, or `off`), over `/crosstalk usage` | 93 |
 
-`/crosstalk open-in`, `/crosstalk editor` and `/crosstalk launch` save their settings in `setup.json` in the shared folder, so every profile uses them.
+`/crosstalk open-in`, `/crosstalk editor`, `/crosstalk launch` and `/crosstalk usage` save their settings in `setup.json` in the shared folder, so every profile uses them.
 
 ## Tested on
 

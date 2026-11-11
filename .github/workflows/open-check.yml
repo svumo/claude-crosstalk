@@ -28,6 +28,10 @@ on:
       - "scripts/app-windows-check.ps1"
       - "app-windows/**"
       - "tests/**"
+      - "copilot/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig.json"
       - ".github/workflows/open-check.yml"
 
 permissions:
@@ -118,6 +122,32 @@ jobs:
           done
           echo "::notice title=tmate::${address:-no address; see the Hold for SSH step}"
           echo "When you're done: touch /continue (or just exit), and the run ends."
+
+  # The Copilot sidecar: strict type-check, then its tests, which run whole tasks against the fake
+  # ACP server in a real git worktree. No Copilot account is needed. On every pull request.
+  copilot:
+    if: github.event_name == 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install the type checker
+        run: npm ci --no-audit --no-fund
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Sidecar tests
+        run: npm run test:sidecar
 
   # The plugin tests on Windows, and the app-windows scripts in PowerShell 7 and 5.1 (they parse,
   # and install.ps1 puts things in the right places). The desktop app itself isn't on the runner.

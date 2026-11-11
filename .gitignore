@@ -2,3 +2,11 @@
 .DS_Store
 Thumbs.db
 *.log
+*.tsbuildinfo
+# TypeScript dev tools for `tsc --noEmit`; the plugin itself has no dependencies.
+node_modules/
+# Claude Code's worktrees for parallel sessions, and per-person permissions.
+.claude/worktrees/
+.claude/settings.local.json
+# The Copilot build plan, kept at the root while the work runs.
+/optimized-greeting-thunder.md
