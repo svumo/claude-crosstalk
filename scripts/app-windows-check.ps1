@@ -54,15 +54,15 @@ $env:CLAUDE_CONFIG_DIR = $null
 . (Join-Path $root 'claude-common.ps1')
 $store = 'C:\Program Files\WindowsApps\Claude_4.1.0.0_x64__abc\app\Claude.exe'
 Check 'the main window is default' ((Get-WindowNameOf $store "`"$store`"") -eq 'default')
-Check 'a claude-app.ps1 window goes by its profile' ((Get-WindowNameOf $store "`"$store`" --user-data-dir=`"C:\Users\me\.claude-Fuuk-app`" `"claude://x`"") -eq 'fuuk')
+Check 'a claude-app.ps1 window goes by its profile' ((Get-WindowNameOf $store "`"$store`" --user-data-dir=`"C:\Users\me\.claude-Studio-app`" `"claude://x`"") -eq 'studio')
 Check 'an app helper process is not a window' ($null -eq (Get-WindowNameOf $store "`"$store`" --type=utility"))
 Check 'the Claude Code CLI is not a window' ($null -eq (Get-WindowNameOf 'C:\Users\me\.local\bin\claude.exe' 'claude.exe'))
 $oldWin = $env:CLAUDE_CROSSTALK_WINDOW; $oldCfg = $env:CLAUDE_CONFIG_DIR
 try {
-    $env:CLAUDE_CROSSTALK_WINDOW = 'fuuk'
-    Check 'a named profile wins over here' ((Resolve-WindowName 'Mikey').Name -eq 'mikey' -and -not (Resolve-WindowName 'mikey').Why)
-    Check 'here is the window this session is in' ((Resolve-WindowName 'here').Name -eq 'fuuk')
-    Check 'no name means here' ((Resolve-WindowName '').Name -eq 'fuuk')
+    $env:CLAUDE_CROSSTALK_WINDOW = 'studio'
+    Check 'a named profile wins over here' ((Resolve-WindowName 'Team').Name -eq 'team' -and -not (Resolve-WindowName 'team').Why)
+    Check 'here is the window this session is in' ((Resolve-WindowName 'here').Name -eq 'studio')
+    Check 'no name means here' ((Resolve-WindowName '').Name -eq 'studio')
     $env:CLAUDE_CROSSTALK_WINDOW = $null
     if (-not (Get-HostWindowName)) {
         # Outside the app (as in CI), here falls back to this session's own profile.
@@ -79,11 +79,11 @@ try {
 
 # The notification link takes only a plain window name and an app session id, and the toast the same.
 function Fails([scriptblock]$Run) { try { & $Run 2>&1 | Out-Null; return ($LASTEXITCODE -ne 0) } catch { return $true } }
-foreach ($bad in 'crosstalk-window://open?window=..%5Cx&session=local_1', 'crosstalk-window://open?window=fuuk&session=local_1&q=calc', 'claude://code/new?folder=x', 'calc.exe') {
+foreach ($bad in 'crosstalk-window://open?window=..%5Cx&session=local_1', 'crosstalk-window://open?window=studio&session=local_1&q=calc', 'claude://code/new?folder=x', 'calc.exe') {
     Check "claude-open-link.ps1 refuses $bad" (Fails { & pwsh -NoProfile -File (Join-Path $root 'claude-open-link.ps1') $bad })
 }
 Check 'claude-toast.ps1 refuses a bad window name' (Fails { & pwsh -NoProfile -File (Join-Path $root 'claude-toast.ps1') '..\x' local_1 t b -Force })
-Check 'claude-toast.ps1 refuses a bad session id' (Fails { & pwsh -NoProfile -File (Join-Path $root 'claude-toast.ps1') fuuk 'x; calc' t b -Force })
+Check 'claude-toast.ps1 refuses a bad session id' (Fails { & pwsh -NoProfile -File (Join-Path $root 'claude-toast.ps1') studio 'x; calc' t b -Force })
 
 if ($failed) { "$failed failed"; exit 1 }
 'All passed'

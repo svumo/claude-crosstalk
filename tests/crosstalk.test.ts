@@ -457,7 +457,7 @@ test('only Claude Code is started', async () => {
 
 test('open can set the model and permission mode, and nothing that breaks the launch rule', async () => {
   expect(withLaunchFlags('claude zai', {})).toEqual({ command: 'claude zai' })
-  expect(withLaunchFlags('claude-mikey', { model: 'sonnet', permissionMode: 'plan' })).toEqual({ command: 'claude-mikey --model sonnet --permission-mode plan' })
+  expect(withLaunchFlags('claude-team', { model: 'sonnet', permissionMode: 'plan' })).toEqual({ command: 'claude-team --model sonnet --permission-mode plan' })
   expect(withLaunchFlags('claude', { model: ' claude-sonnet-5-5 ' })).toEqual({ command: 'claude --model claude-sonnet-5-5' })
   expect(withLaunchFlags('claude', { permissionMode: 'acceptEdits' })).toEqual({ command: 'claude --permission-mode acceptEdits' })
   for (const model of ['opus[1m]', 'x;y', 'a b', '$(x)']) expect(withLaunchFlags('claude', { model }).error).toMatch(/can't be a model/)
@@ -472,7 +472,7 @@ test('a permission mode is matched whatever its case', async () => {
 })
 
 test('/crosstalk open reads --model and --mode after the profile, and the rest is the message', async () => {
-  expect(parseOpenArgs(['Mikey', '--model', 'sonnet', '--mode=plan', 'say', 'hi'])).toEqual({ profile: 'mikey', model: 'sonnet', permissionMode: 'plan', openIn: '', message: 'say hi' })
+  expect(parseOpenArgs(['Team', '--model', 'sonnet', '--mode=plan', 'say', 'hi'])).toEqual({ profile: 'team', model: 'sonnet', permissionMode: 'plan', openIn: '', message: 'say hi' })
   expect(parseOpenArgs(['zai', '--permission-mode', 'auto'])).toEqual({ profile: 'zai', model: '', permissionMode: 'auto', openIn: '', message: '' })
   expect(parseOpenArgs(['zai', 'use', '--model', 'x'])).toEqual({ profile: 'zai', model: '', permissionMode: '', openIn: '', message: 'use --model x' })
   expect(parseOpenArgs(['zai', '--fast']).error).toMatch(/Unknown option --fast/)
@@ -483,9 +483,9 @@ test('/crosstalk open reads --model and --mode after the profile, and the rest i
 
 test('on macOS a Terminal window opens in the folder, however the folder is named', async () => {
   expect(shQuote("it's here")).toBe("'it'\\''s here'")
-  const argv = macArgv('/Users/me/a "b" \\c', 'claude-mikey --model sonnet')
+  const argv = macArgv('/Users/me/a "b" \\c', 'claude-team --model sonnet')
   expect(argv.slice(0, 2)).toEqual(['osascript', '-e'])
-  expect(argv[2]).toBe('tell application "Terminal" to do script "cd \'/Users/me/a \\"b\\" \\\\c\' && claude-mikey --model sonnet"')
+  expect(argv[2]).toBe('tell application "Terminal" to do script "cd \'/Users/me/a \\"b\\" \\\\c\' && claude-team --model sonnet"')
   expect(argv.slice(3)).toEqual(['-e', 'tell application "Terminal" to activate'])
 })
 
@@ -498,11 +498,11 @@ test('on Linux the terminal is tmux when inside it, else the first desktop one, 
   expect(whichArgv(['tmux', 'xterm']).slice(-2)).toEqual(['tmux', 'xterm'])
   expect(userShell('/usr/bin/zsh')).toBe('/usr/bin/zsh')
   for (const bad of [undefined, '', 'zsh', '/bin/sh; rm', '/bin/$(x)']) expect(userShell(bad)).toBe('/bin/bash')
-  const run = ['/bin/zsh', '-ic', "cd '/home/me/my proj' && claude-mikey; exec /bin/zsh"]
-  expect(linuxArgv('tmux', '/home/me/my proj', 'claude-mikey', '/bin/zsh')).toEqual(['tmux', 'new-window', '-c', '/home/me/my proj', ...run])
-  expect(linuxArgv('gnome-terminal', '/home/me/my proj', 'claude-mikey', '/bin/zsh')).toEqual(['gnome-terminal', '--', ...run])
-  expect(linuxArgv('kitty', '/home/me/my proj', 'claude-mikey', '/bin/zsh')).toEqual(['sh', '-c', 'nohup "$@" >/dev/null 2>&1 &', 'sh', 'kitty', ...run])
-  expect(linuxArgv('xterm', '/home/me/my proj', 'claude-mikey', '/bin/zsh').slice(4)).toEqual(['xterm', '-e', ...run])
+  const run = ['/bin/zsh', '-ic', "cd '/home/me/my proj' && claude-team; exec /bin/zsh"]
+  expect(linuxArgv('tmux', '/home/me/my proj', 'claude-team', '/bin/zsh')).toEqual(['tmux', 'new-window', '-c', '/home/me/my proj', ...run])
+  expect(linuxArgv('gnome-terminal', '/home/me/my proj', 'claude-team', '/bin/zsh')).toEqual(['gnome-terminal', '--', ...run])
+  expect(linuxArgv('kitty', '/home/me/my proj', 'claude-team', '/bin/zsh')).toEqual(['sh', '-c', 'nohup "$@" >/dev/null 2>&1 &', 'sh', 'kitty', ...run])
+  expect(linuxArgv('xterm', '/home/me/my proj', 'claude-team', '/bin/zsh').slice(4)).toEqual(['xterm', '-e', ...run])
 })
 
 test('a folder is marked trusted in a profile record, and nothing else changes', async () => {
@@ -539,9 +539,9 @@ test('in the desktop app, auto and app open a tab of its Terminal panel', async 
 test("a folder at the desktop app's packaged spelling is the same folder", async () => {
   const plain = 'C:\\Users\\me\\AppData\\Roaming\\Claude\\scratch\\s1'
   const packaged = 'C:\\Users\\me\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude\\scratch\\s1'
-  const r = { id: 'm', profile: 'mikey', address: 'mikey/s1-m', cwd: packaged, startedAt: NOW, seenAt: NOW }
-  expect(findOpened([r], 'mikey', plain, NOW - 5_000, NOW)?.id).toBe('m')
-  expect(findOpened([r], 'mikey', 'C:\\Users\\me\\AppData\\Roaming\\Claude\\scratch\\s2', NOW - 5_000, NOW)).toBe(null)
+  const r = { id: 'm', profile: 'team', address: 'team/s1-m', cwd: packaged, startedAt: NOW, seenAt: NOW }
+  expect(findOpened([r], 'team', plain, NOW - 5_000, NOW)?.id).toBe('m')
+  expect(findOpened([r], 'team', 'C:\\Users\\me\\AppData\\Roaming\\Claude\\scratch\\s2', NOW - 5_000, NOW)).toBe(null)
 })
 
 test('the VS Code link carries any folder whole', async () => {
@@ -655,19 +655,19 @@ test('from the desktop app, open types the launch command into a new Terminal pa
     return refuse ? { deny: refuse } : { result: [{ type: 'text', text: 'Started in new terminal tab "c1"' }] }
   })
   on('clock.sleep', () => ({ value: undefined }))
-  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey' } }))
+  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { team: 'claude team' } }))
   await $.session.start(START)
   await say($, 'open-in panel')
   const status = await say($, 'open-in')
   expect(status).toMatch(/new tab in the Claude desktop app's Terminal panel/)
-  const ok: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'mikey', model: 'sonnet' } as never)
-  expect(JSON.stringify(ok)).toMatch(/Opening mikey \(claude mikey --model sonnet\) in a new tab of the app's Terminal panel/)
-  expect(typed.at(-1)).toMatchObject({ command: "$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1'; claude mikey --model sonnet", cwd: 'C:\\code\\proj', title: 'claude mikey' })
+  const ok: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'team', model: 'sonnet' } as never)
+  expect(JSON.stringify(ok)).toMatch(/Opening team \(claude team --model sonnet\) in a new tab of the app's Terminal panel/)
+  expect(typed.at(-1)).toMatchObject({ command: "$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1'; claude team --model sonnet", cwd: 'C:\\code\\proj', title: 'claude team' })
   expect(calls.some((a) => a[0] === 'wt' || a.includes('--list-extensions'))).toBe(false) // no window, no editor check
   refuse = 'The user declined'
-  expect(await say($, 'open mikey hi')).toMatch(/Terminal panel didn't run it: The user declined\. \/crosstalk open-in window/)
+  expect(await say($, 'open team hi')).toMatch(/Terminal panel didn't run it: The user declined\. \/crosstalk where window/)
   expect(await say($, 'open-in window')).toMatch(/open in: window/)
-  expect(await say($, 'open mikey')).toMatch(/new terminal window/)
+  expect(await say($, 'open team')).toMatch(/new terminal window/)
   expect(typed.length).toBe(2)
 })
 
@@ -690,7 +690,7 @@ test('open-in window opens a terminal window, and the setting is kept', async ($
   expect(await say($, 'open-in window')).toMatch(/open in: window/)
   const status = await say($, 'open-in')
   expect(status).toMatch(/open in: window/)
-  expect(status).toMatch(/Helper: not checked, as open-in is window/)
+  expect(status).toMatch(/Helper: not checked, as where is window/)
   expect(status).not.toMatch(/Install the helper/)
   const opened = await say($, 'open zai')
   expect(opened).toMatch(/new terminal window/)
@@ -758,12 +758,12 @@ test('on macOS open starts a Terminal window', async ($, on) => {
   })
   on('clock.sleep', () => ({ value: undefined }))
   await $.session.start(START)
-  expect(await say($, 'open mikey --mode plan')).toMatch(/Opening mikey \(claude-mikey --permission-mode plan\) in a new Terminal window/)
+  expect(await say($, 'open team --mode plan')).toMatch(/Opening team \(claude-team --permission-mode plan\) in a new Terminal window/)
   const osascript = calls.find((c) => c.argv[0] === 'osascript')
-  expect(osascript.argv).toEqual(macArgv('C:\\code\\proj', 'claude-mikey --permission-mode plan'))
+  expect(osascript.argv).toEqual(macArgv('C:\\code\\proj', 'claude-team --permission-mode plan'))
   expect(osascript.init?.timeoutMs ?? osascript.timeoutMs).toBe(120_000) // time to answer macOS's first-time prompt
   refused = true
-  expect(await say($, 'open mikey')).toMatch(/Privacy & Security > Automation/)
+  expect(await say($, 'open team')).toMatch(/Privacy & Security > Automation/)
 })
 
 test('on Linux open uses the terminal it finds, and says so when there is none', async ($, on) => {
@@ -777,16 +777,16 @@ test('on Linux open uses the terminal it finds, and says so when there is none',
   })
   on('clock.sleep', () => ({ value: undefined }))
   await $.session.start(START)
-  expect(await say($, 'open mikey')).toMatch(/in a new konsole window/)
-  expect(calls.at(-1)).toEqual(linuxArgv('konsole', 'C:\\code\\proj', 'claude-mikey', '/bin/zsh'))
+  expect(await say($, 'open team')).toMatch(/in a new konsole window/)
+  expect(calls.at(-1)).toEqual(linuxArgv('konsole', 'C:\\code\\proj', 'claude-team', '/bin/zsh'))
   installed = ''
-  expect(await say($, 'open mikey')).toMatch(/Couldn't find a terminal to open/)
+  expect(await say($, 'open team')).toMatch(/Couldn't find a terminal to open/)
 })
 
 // Session titles: the name the person sees in the desktop app, or from /rename.
 
 test('a title is one tidy line, and a session is named by it with its address', async () => {
-  expect(cleanTitle('  Claude Fuuk\nfor   next task\u0007 ')).toBe('Claude Fuuk for next task')
+  expect(cleanTitle('  Plan the\nnext   release\u0007 ')).toBe('Plan the next release')
   expect(cleanTitle(undefined)).toBe('')
   expect(cleanTitle('x'.repeat(300)).length).toBe(120)
   expect(labelOf({ address: 'default/a-1', title: 'Fix the login' })).toBe('Fix the login (default/a-1)')
@@ -796,9 +796,9 @@ test('a title is one tidy line, and a session is named by it with its address', 
 })
 
 test('the desktop app title is read from its session file, only for this session', async () => {
-  const file = (o: object) => JSON.stringify({ sessionId: 'local_1', cliSessionId: 'cli-1', title: 'Claude Fuuk for next task', titleSource: 'auto', ...o })
-  expect(appTitle(file({}), 'cli-1')).toBe('Claude Fuuk for next task')
-  expect(appTitle(file({ cliSessionId: 'cli-2', lastAssistantCliSessionId: 'cli-1' }), 'cli-1')).toBe('Claude Fuuk for next task')
+  const file = (o: object) => JSON.stringify({ sessionId: 'local_1', cliSessionId: 'cli-1', title: 'Plan the next release', titleSource: 'auto', ...o })
+  expect(appTitle(file({}), 'cli-1')).toBe('Plan the next release')
+  expect(appTitle(file({ cliSessionId: 'cli-2', lastAssistantCliSessionId: 'cli-1' }), 'cli-1')).toBe('Plan the next release')
   expect(appTitle(file({}), 'someone-else')).toBe('') // a terminal that inherited the app's variables
   expect(appTitle(file({ title: 42 }), 'cli-1')).toBe('')
   expect(appTitle('{not json', 'cli-1')).toBe('')
@@ -815,7 +815,7 @@ test('a transcript title: /rename wins over the made one, the last of each count
 })
 
 test('a transcript is found under the folder the CLI names after the working folder', async () => {
-  expect(projectFolderName('C:\\Users\\me\\Documents\\github\\claude-crosstalk\\.claude\\worktrees\\zen-1')).toBe('C--Users-me-Documents-github-claude-crosstalk--claude-worktrees-zen-1')
+  expect(projectFolderName('C:\\Users\\me\\code\\my-app\\.claude\\worktrees\\zen-1')).toBe('C--Users-me-code-my-app--claude-worktrees-zen-1')
   expect(projectFolderName('/home/me/my app')).toBe('-home-me-my-app')
 })
 
@@ -823,23 +823,23 @@ test('the app data folder: the one its Claude Code runs from, a second copy for 
   const msix = 'C:\\Users\\me\\AppData\\Local\\Packages\\Claude_pzs8sxrjxfjjc\\LocalCache\\Roaming\\Claude'
   const found = appDataFolders({
     execPath: `${msix}\\claude-code\\2.1.317\\a33aa\\claude.exe`,
-    appData: 'C:\\Users\\me\\AppData\\Roaming', localAppData: 'C:\\Users\\me\\AppData\\Local', home: 'C:\\Users\\me', profile: 'fuuk',
+    appData: 'C:\\Users\\me\\AppData\\Roaming', localAppData: 'C:\\Users\\me\\AppData\\Local', home: 'C:\\Users\\me', profile: 'studio',
   })
-  expect(found.slice(0, 3)).toEqual([msix.replace(/\\/g, '/'), 'C:/Users/me/.claude-fuuk-app', 'C:/Users/me/AppData/Roaming/Claude'])
+  expect(found.slice(0, 3)).toEqual([msix.replace(/\\/g, '/'), 'C:/Users/me/.claude-studio-app', 'C:/Users/me/AppData/Roaming/Claude'])
   expect(found.filter((f) => f.toLowerCase() === msix.replace(/\\/g, '/').toLowerCase()).length).toBe(1) // once, though listed twice
-  const second = appDataFolders({ execPath: 'C:\\Users\\me\\.claude-fuuk-app\\claude-code\\2.1.317\\x\\claude.exe', home: 'C:\\Users\\me', profile: 'fuuk' })
-  expect(second[0]).toBe('C:/Users/me/.claude-fuuk-app')
+  const second = appDataFolders({ execPath: 'C:\\Users\\me\\.claude-studio-app\\claude-code\\2.1.317\\x\\claude.exe', home: 'C:\\Users\\me', profile: 'studio' })
+  expect(second[0]).toBe('C:/Users/me/.claude-studio-app')
   expect(appDataFolders({ override: 'D:\\apps\\claude\\', home: '/home/me', profile: 'default' })).toEqual(['D:/apps/claude', '/home/me/Library/Application Support/Claude', '/home/me/.config/Claude'])
 })
 
 test('a message can go to a session by its title, when only one has it', async () => {
   const t = (id: string, address: string, title: string) => ({ ...rec(id, address.split('/')[0], address), title })
-  const all = [rec('me', 'work', 'work/a-1'), t('f1', 'fuuk/x-1', 'Claude Fuuk for next task'), t('d1', 'default/y-2', 'Same name'), t('d2', 'default/z-3', 'Same name')]
-  expect(resolveTarget('claude fuuk for next task', all, 'me', NOW).record?.id).toBe('f1')
-  expect(resolveTarget('"Claude Fuuk for next task"', all, 'me', NOW).record?.id).toBe('f1')
+  const all = [rec('me', 'work', 'work/a-1'), t('f1', 'studio/x-1', 'Plan the next release'), t('d1', 'default/y-2', 'Same name'), t('d2', 'default/z-3', 'Same name')]
+  expect(resolveTarget('plan the next release', all, 'me', NOW).record?.id).toBe('f1')
+  expect(resolveTarget('"Plan the next release"', all, 'me', NOW).record?.id).toBe('f1')
   expect(resolveTarget('Same name', all, 'me', NOW).error).toMatch(/could be several sessions: Same name \(default\/y-2\), Same name \(default\/z-3\)/)
-  expect(resolveTarget('nobody', all, 'me', NOW).error).toMatch(/Running now: Claude Fuuk for next task \(fuuk\/x-1\)/)
-  expect(resolveTarget('fuuk', all, 'me', NOW).record?.id).toBe('f1') // a profile still works
+  expect(resolveTarget('nobody', all, 'me', NOW).error).toMatch(/Running now: Plan the next release \(studio\/x-1\)/)
+  expect(resolveTarget('studio', all, 'me', NOW).record?.id).toBe('f1') // a profile still works
 })
 
 const APP = 'C:/home/.claude-work-app'
@@ -861,21 +861,21 @@ test('a desktop-app session goes by its app title, read from its own app copy, a
   expect(mine().address).toBe('work/new-session-self')
   expect(mine().alias).toBe('work/proj-self')
 
-  files.set(`${APP}/claude-code-sessions/acct/org/local_abc-1.json`, appFile('Claude Fuuk for next task'))
+  files.set(`${APP}/claude-code-sessions/acct/org/local_abc-1.json`, appFile('Plan the next release'))
   files.beat()
   await settle()
-  expect(mine().title).toBe('Claude Fuuk for next task')
-  expect(mine().address).toBe('work/claude-fuuk-for-next-task-self')
+  expect(mine().title).toBe('Plan the next release')
+  expect(mine().address).toBe('work/plan-the-next-release-self')
 
   files.set(`${BOX}/sessions/other.json`, JSON.stringify({ id: 'other', profile: 'personal', address: 'personal/x-oth', cwd: 'C:/y', seenAt: NOW, title: 'Tidy the docs' }))
   const listed: any = await $.tool.call({ tool: 'mcp__crosstalk__list' } as never)
-  expect(JSON.stringify(listed)).toMatch(/You are Claude Fuuk for next task \(work\/claude-fuuk-for-next-task-self\)/)
+  expect(JSON.stringify(listed)).toMatch(/You are Plan the next release \(work\/plan-the-next-release-self\)/)
   expect(JSON.stringify(listed)).toMatch(/Tidy the docs \(personal\/x-oth, folder C:\/y\)/)
 
   const sent: any = await $.tool.call({ tool: 'mcp__crosstalk__send', to: 'tidy the docs', text: 'hi' } as never)
   expect(JSON.stringify(sent)).toMatch(/Sent to Tidy the docs \(personal\/x-oth\)/)
   const written = [...files.keys()].find((k) => k.startsWith(`${BOX}/inbox/other/`))!
-  expect(JSON.parse(files.get(written)!)).toMatchObject({ from: 'work/claude-fuuk-for-next-task-self', fromTitle: 'Claude Fuuk for next task' })
+  expect(JSON.parse(files.get(written)!)).toMatchObject({ from: 'work/plan-the-next-release-self', fromTitle: 'Plan the next release' })
 })
 
 test('Claude runs any /crosstalk command through the crosstalk tool', async ($, on) => {
@@ -919,13 +919,13 @@ test('a session with no title yet goes by its address, and is named when one com
 })
 
 test('a message from a titled session shows the title with the address', async () => {
-  const m = { from: 'fuuk/x-1', fromTitle: 'Claude Fuuk for next task', sentAt: NOW, text: 'done', name: 'a.json' }
-  expect(frameMessages([m])).toMatch(/From Claude Fuuk for next task \(fuuk\/x-1\), sent/)
-  expect(showMessages([m])).toMatch(/^Crosstalk ← Claude Fuuk for next task \(fuuk\/x-1\) · /)
+  const m = { from: 'studio/x-1', fromTitle: 'Plan the next release', sentAt: NOW, text: 'done', name: 'a.json' }
+  expect(frameMessages([m])).toMatch(/From Plan the next release \(studio\/x-1\), sent/)
+  expect(showMessages([m])).toMatch(/^Crosstalk ← Plan the next release \(studio\/x-1\) · /)
 })
 
 test('a Terminal panel tab keeps its transcript: the app marker is overridden, in the shell the tab runs', async () => {
-  expect(appPanelCommand('claude mikey', true)).toBe("$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1'; claude mikey")
+  expect(appPanelCommand('claude team', true)).toBe("$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1'; claude team")
   expect(appPanelCommand('claude-work --model opus', false)).toBe('export CLAUDE_CODE_FORCE_SESSION_PERSISTENCE=1; claude-work --model opus')
 })
 
@@ -955,20 +955,20 @@ test('a flag stops sessions on its profile or account, until its window resets',
   const flag = { profile: 'work', account: 'acct-1', kind: 'five_hour', percent: 93, resetsAt: new Date(NOW + 1000).toISOString(), at: NOW }
   expect(flagApplies(flag, { profile: 'work' }, NOW)).toBe(true)
   expect(flagApplies(flag, { profile: 'renamed', account: 'acct-1' }, NOW)).toBe(true)
-  expect(flagApplies(flag, { profile: 'mikey', account: 'acct-2' }, NOW)).toBe(false)
+  expect(flagApplies(flag, { profile: 'team', account: 'acct-2' }, NOW)).toBe(false)
   expect(flagApplies(flag, { profile: 'work' }, NOW + 1000)).toBe(false)
   expect(flagEnds({ at: NOW })).toBe(NOW + FLAG_MS)
 })
 
 test('the move picker: other profiles, lowest usage first, tripped ones and this one left out', async () => {
   const r = (id: string, profile: string, percent?: number) => ({ ...rec(id, profile, `${profile}/x-${id}`), usage: percent === undefined ? undefined : { percent } })
-  const records = [r('a', 'work', 95), r('b', 'mikey', 40), r('c', 'mikey', 12), r('d', 'zai', 5), r('e', 'fuuk')]
+  const records = [r('a', 'work', 95), r('b', 'team', 40), r('c', 'team', 12), r('d', 'zai', 5), r('e', 'studio')]
   const flags = [{ profile: 'zai', at: NOW }]
-  const choices = moveChoices(records, ['glm', 'mikey'], { profile: 'work' }, flags, NOW)
-  expect(choices).toEqual([{ profile: 'mikey', percent: 40 }, { profile: 'fuuk', percent: null }, { profile: 'glm', percent: null }])
-  expect(choiceLabel(choices[0])).toBe('mikey (40%)')
-  expect(choiceLabel(choices[1])).toBe('fuuk (no reading)')
-  expect(chosenProfile('mikey (40%)', choices)).toBe('mikey')
+  const choices = moveChoices(records, ['glm', 'team'], { profile: 'work' }, flags, NOW)
+  expect(choices).toEqual([{ profile: 'team', percent: 40 }, { profile: 'glm', percent: null }, { profile: 'studio', percent: null }])
+  expect(choiceLabel(choices[0])).toBe('team (40%)')
+  expect(choiceLabel(choices[2])).toBe('studio (no reading)')
+  expect(chosenProfile('team (40%)', choices)).toBe('team')
   expect(chosenProfile('Personal', choices)).toBe('personal') // typed under Other
   expect(chosenProfile(NOT_NOW, choices)).toBe('')
 })
@@ -1012,7 +1012,7 @@ const until = async (check: () => boolean) => {
 const measure = ($: any, percentUsed: number, contextPercent = 30) =>
   $.session.measure({ context: { window: 200_000, percent: contextPercent }, rateLimits: [{ kind: 'five_hour', percentUsed, resetsAt: RESET }], changed: ['rateLimits'] })
 
-function guardWorld(on: any, answer = 'mikey (12%)', extraEnv: Record<string, string> = {}) {
+function guardWorld(on: any, answer = 'team (12%)', extraEnv: Record<string, string> = {}) {
   const ran: any[] = []
   const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', ...extraEnv }, (e: any) => { ran.push(e.argv); return RAN_OK })
   const w: any = { files, ran, aborted: [] as string[], compacted: [] as any[], asked: [] as any[] }
@@ -1027,10 +1027,10 @@ function guardWorld(on: any, answer = 'mikey (12%)', extraEnv: Record<string, st
     const q = e.questions?.[0]?.question
     return { result: { questions: e.questions, answers: { [q]: answer } } }
   })
-  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey' } }))
-  // mikey is running at 12%, and a mikey session in this folder shows up once opened.
-  files.set(`${BOX}/sessions/m1.json`, JSON.stringify({ id: 'm1', profile: 'mikey', address: 'mikey/x-m1', cwd: 'C:\\elsewhere', seenAt: NOW, startedAt: 1, usage: { kind: 'five_hour', percent: 12, stopAt: 93 } }))
-  w.openedNew = () => files.set(`${BOX}/sessions/new-1.json`, JSON.stringify({ id: 'new-1', profile: 'mikey', address: 'mikey/proj-new', cwd: 'C:\\code\\proj', seenAt: NOW, startedAt: NOW }))
+  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { team: 'claude team' } }))
+  // team is running at 12%, and a team session in this folder shows up once opened.
+  files.set(`${BOX}/sessions/m1.json`, JSON.stringify({ id: 'm1', profile: 'team', address: 'team/x-m1', cwd: 'C:\\elsewhere', seenAt: NOW, startedAt: 1, usage: { kind: 'five_hour', percent: 12, stopAt: 93 } }))
+  w.openedNew = () => files.set(`${BOX}/sessions/new-1.json`, JSON.stringify({ id: 'new-1', profile: 'team', address: 'team/proj-new', cwd: 'C:\\code\\proj', seenAt: NOW, startedAt: NOW }))
   w.handoff = () => [...files.keys()].find((k: string) => k.startsWith(`${BOX}/handoffs/`))
   w.resume = () => {
     const k = [...files.keys()].find((x: string) => x.startsWith(`${BOX}/inbox/new-1/`))
@@ -1054,9 +1054,9 @@ test('at 93% a session flags its account, stops its turn, compacts, writes a han
   expect(handoff).toMatch(/93% of its 5-hour limit/)
   expect(handoff).toMatch(/SUMMARY: fix the login/)
   expect(handoff).toMatch(/projects\/C--code-proj\/self-1\.jsonl/)
-  expect(JSON.stringify(w.asked[0])).toMatch(/work is at 93% of its 5-hour limit\. Move this session to mikey\?/)
-  expect(JSON.stringify(w.asked[0])).toMatch(/mikey \(12%\).*Not now/)
-  expect(w.ran.some((argv: string[]) => argv.join(' ').includes('claude mikey'))).toBe(true)
+  expect(JSON.stringify(w.asked[0])).toMatch(/work is at 93% of its 5-hour limit\. Move this session to team\?/)
+  expect(JSON.stringify(w.asked[0])).toMatch(/team \(12%\).*Not now/)
+  expect(w.ran.some((argv: string[]) => argv.join(' ').includes('claude team'))).toBe(true)
   expect(w.resume()).toMatch(/You own this work alone: don't message work\/proj-self/)
   expect(w.files.logs.some((l: string) => /stopped and compacted\. Handoff: [^\n]*\n\nSUMMARY/.test(l))).toBe(true)
   expect(isPaused(JSON.parse(w.files.get(`${BOX}/sessions/self-1.json`)))).toBe(true)
@@ -1086,7 +1086,7 @@ test('a digest of a transcript is built without a model: first request, latest o
 })
 
 test('with a readable transcript the handoff is cut from it: no compaction, one offer, a tab in Windows Terminal', async ($, on) => {
-  const w = guardWorld(on, 'mikey (12%)', { WT_SESSION: 'abc' })
+  const w = guardWorld(on, 'team (12%)', { WT_SESSION: 'abc' })
   w.files.set(TRANSCRIPT, talk)
   await $.session.start(START)
   w.openedNew()
@@ -1097,27 +1097,27 @@ test('with a readable transcript the handoff is cut from it: no compaction, one 
   expect(handoff).toMatch(/fix the login redirect/)
   expect(handoff).toMatch(/Added login\.test\.ts; one still fails/)
   expect(w.asked.length).toBe(1)
-  expect(w.asked[0].questions[0].options.length).toBe(2) // mikey, Not now
-  const opened = w.ran.find((argv: string[]) => argv.join(' ').includes('claude mikey'))
+  expect(w.asked[0].questions[0].options.length).toBe(2) // team, Not now
+  const opened = w.ran.find((argv: string[]) => argv.join(' ').includes('claude team'))
   expect(opened.slice(0, 4)).toEqual(['wt', '-w', '0', 'new-tab'])
 })
 
 test('usageCompact brings the model summary back', async ($, on) => {
   const w = guardWorld(on, NOT_NOW)
   w.files.set(TRANSCRIPT, talk)
-  w.files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey' }, usageCompact: true }))
+  w.files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { team: 'claude team' }, usageCompact: true }))
   await $.session.start(START)
   await measure($, 94)
   expect(await until(() => w.compacted.length === 1)).toBe(true)
 })
 
 test('a session nothing was typed in has nothing to hand over: no handoff, the profile opens fresh', async ($, on) => {
-  const w = guardWorld(on, 'mikey (12%)')
+  const w = guardWorld(on, 'team (12%)')
   w.files.set(TRANSCRIPT, line({ type: 'mode', mode: 'normal' }) + '\n' + line({ type: 'system', content: 'notice' }))
   await $.session.start(START)
   w.openedNew()
   await measure($, 94)
-  expect(await until(() => w.ran.some((argv: string[]) => argv.join(' ').includes('claude mikey')))).toBe(true)
+  expect(await until(() => w.ran.some((argv: string[]) => argv.join(' ').includes('claude team')))).toBe(true)
   expect(w.compacted.length).toBe(0)
   expect(w.handoff()).toBe(undefined)
   expect(w.files.logs.some((l: string) => /empty: nothing was typed here/.test(l))).toBe(true)
@@ -1135,12 +1135,12 @@ test('another session on the same profile stops from the flag alone; Not now lea
   expect(w.compacted.length).toBe(1)
   expect(w.files.get(w.handoff())).toMatch(/94% of its 5-hour limit/)
   expect(submitted.length).toBe(0) // the message waits: no wake-ups while held
-  expect(w.ran.some((argv: string[]) => argv.join(' ').includes('claude mikey'))).toBe(false)
+  expect(w.ran.some((argv: string[]) => argv.join(' ').includes('claude team'))).toBe(false)
 })
 
 test('a flag for another profile leaves this session alone', async ($, on) => {
   const w = guardWorld(on)
-  w.files.set(`${BOX}/usage/mikey.json`, JSON.stringify({ profile: 'mikey', kind: 'five_hour', percent: 95, resetsAt: RESET, at: NOW }))
+  w.files.set(`${BOX}/usage/team.json`, JSON.stringify({ profile: 'team', kind: 'five_hour', percent: 95, resetsAt: RESET, at: NOW }))
   await $.session.start(START)
   w.files.tick()
   await settle()
@@ -1193,7 +1193,7 @@ test('move hands a healthy session over at once, and the new one reports back on
   await $.session.start(START)
   w.openedNew()
   await measure($, 20)
-  expect(await say($, 'move mikey')).toMatch(/Moving this session to mikey/)
+  expect(await say($, 'move team')).toMatch(/Moving this session to team/)
   expect(await until(() => w.resume() !== '')).toBe(true)
   expect(w.asked.length).toBe(0)
   expect(w.compacted.length).toBe(1)
@@ -1204,84 +1204,84 @@ test('move hands a healthy session over at once, and the new one reports back on
 test('sending to a session paused for usage still delivers, and says it will not answer yet', async ($, on) => {
   const w = guardWorld(on)
   await $.session.start(START)
-  w.files.set(`${BOX}/sessions/p1.json`, JSON.stringify({ id: 'p1', profile: 'fuuk', address: 'fuuk/x-p1', cwd: 'y', seenAt: NOW, usage: { kind: 'five_hour', percent: 95, resetsAt: RESET, stopAt: 93, isHeld: true } }))
-  const sent: any = await $.tool.call({ tool: 'mcp__crosstalk__send', to: 'fuuk', text: 'done' } as never)
-  expect(JSON.stringify(sent)).toMatch(/Sent to fuuk\/x-p1\. fuuk\/x-p1 is paused near its usage limit/)
+  w.files.set(`${BOX}/sessions/p1.json`, JSON.stringify({ id: 'p1', profile: 'studio', address: 'studio/x-p1', cwd: 'y', seenAt: NOW, usage: { kind: 'five_hour', percent: 95, resetsAt: RESET, stopAt: 93, isHeld: true } }))
+  const sent: any = await $.tool.call({ tool: 'mcp__crosstalk__send', to: 'studio', text: 'done' } as never)
+  expect(JSON.stringify(sent)).toMatch(/Sent to studio\/x-p1\. studio\/x-p1 is paused near its usage limit/)
   expect([...w.files.keys()].some((k: string) => k.startsWith(`${BOX}/inbox/p1/`))).toBe(true)
   const listed: any = await $.tool.call({ tool: 'mcp__crosstalk__list' } as never)
-  expect(JSON.stringify(listed)).toMatch(/fuuk\/x-p1[^"]*\(paused near its usage limit\)/)
+  expect(JSON.stringify(listed)).toMatch(/studio\/x-p1[^"]*\(paused near its usage limit\)/)
 })
 
 // Which app window a session runs in, and which profile `open` picks from it.
 const STORE = 'C:\\Program Files\\WindowsApps\\Claude_4.23118.0.0_x64__pzs8sxrjxfjjc\\app\\claude.exe'
-// A mikey session in a Terminal-panel tab of the fuuk window, as the parent walk prints it.
-const IN_FUUK = [
+// A team session in a Terminal-panel tab of the studio window, as the parent walk prints it.
+const IN_STUDIO = [
   'C:\\WINDOWS\\System32\\cmd.exe\tcmd.exe /d /s /c "pwsh"',
-  'C:\\Users\\me\\.local\\bin\\claude.exe\t"C:\\Users\\me\\.local\\bin\\claude.exe" mikey',
+  'C:\\Users\\me\\.local\\bin\\claude.exe\t"C:\\Users\\me\\.local\\bin\\claude.exe" team',
   'C:\\Program Files\\PowerShell\\7\\pwsh.exe\t"pwsh.exe" -NoProfile -NoExit -Command x',
   `${STORE.replace('claude.exe', 'Claude.exe')}\t"${STORE}" --type=utility --utility-sub-type=node.mojom.NodeService`,
-  `${STORE}\t"${STORE}" --user-data-dir="C:\\Users\\me\\.claude-fuuk-app" "claude://code/new?folder=C%3A%5Cx"`,
+  `${STORE}\t"${STORE}" --user-data-dir="C:\\Users\\me\\.claude-studio-app" "claude://code/new?folder=C%3A%5Cx"`,
   'C:\\WINDOWS\\explorer.exe\tC:\\WINDOWS\\Explorer.EXE',
 ].join('\r\n')
 
 test('an app window is told from its process: the main window, a profile window, and what is not one', async () => {
   expect(appWindowOf(STORE, `"${STORE}"`)).toBe('default')
-  expect(appWindowOf(STORE, `"${STORE}" --user-data-dir="C:\\Users\\me\\.claude-fuuk-app" "claude://x"`)).toBe('fuuk')
+  expect(appWindowOf(STORE, `"${STORE}" --user-data-dir="C:\\Users\\me\\.claude-studio-app" "claude://x"`)).toBe('studio')
   expect(appWindowOf(STORE, `${STORE} --user-data-dir=C:\\Users\\me\\.claude-Work-app`)).toBe('work')
   expect(appWindowOf('C:\\Users\\me\\AppData\\Local\\AnthropicClaude\\app-1.2.3\\claude.exe', 'claude.exe')).toBe('default')
-  expect(appWindowOf(STORE, `"${STORE}" --type=renderer --user-data-dir="C:\\Users\\me\\.claude-fuuk-app"`)).toBe('')
+  expect(appWindowOf(STORE, `"${STORE}" --type=renderer --user-data-dir="C:\\Users\\me\\.claude-studio-app"`)).toBe('')
   expect(appWindowOf('C:\\Users\\me\\.local\\bin\\claude.exe', 'claude.exe')).toBe('') // the CLI
-  expect(appWindowOf('C:\\Users\\me\\.claude-fuuk-app\\claude-code\\2.1\\claude.exe', 'claude.exe')).toBe('') // the app's copy for sessions
+  expect(appWindowOf('C:\\Users\\me\\.claude-studio-app\\claude-code\\2.1\\claude.exe', 'claude.exe')).toBe('') // the app's copy for sessions
 })
 
 test('a session is in the nearest app window above it, and in none outside the app', async () => {
-  expect(parseParents(IN_FUUK)).toHaveLength(6)
-  expect(hostWindow(parseParents(IN_FUUK))).toBe('fuuk')
-  expect(hostWindow(parseParents(IN_FUUK.split('\r\n').slice(0, 3).join('\n')))).toBe('')
+  expect(parseParents(IN_STUDIO)).toHaveLength(6)
+  expect(hostWindow(parseParents(IN_STUDIO))).toBe('studio')
+  expect(hostWindow(parseParents(IN_STUDIO.split('\r\n').slice(0, 3).join('\n')))).toBe('')
   expect(hostWindow([])).toBe('')
-  expect(windowNote({ window: 'fuuk' })).toBe(', in the fuuk app window')
+  expect(windowNote({ window: 'studio' })).toBe(', in the studio app window')
   expect(windowNote({})).toBe('')
-  expect(listLine({ address: 'mikey/x-1', cwd: 'C:\\p', window: 'fuuk' })).toBe('mikey/x-1 (folder C:\\p, in the fuuk app window)')
+  expect(listLine({ address: 'team/x-1', cwd: 'C:\\p', window: 'studio' })).toBe('team/x-1 (folder C:\\p, in the studio app window)')
 })
 
 test('open with no profile stays on this session\'s own, a named one wins, and "window" uses the window\'s', async () => {
-  expect(chooseOpenProfile('', 'fuuk', 'fuuk')).toEqual({ profile: 'fuuk', why: "this session's own profile, as none was named", note: '' })
-  expect(chooseOpenProfile(undefined, 'mikey', '').profile).toBe('mikey')
-  expect(chooseOpenProfile(' Here ', 'mikey', '').profile).toBe('mikey')
-  const tab = chooseOpenProfile('', 'mikey', 'fuuk')
-  expect(tab.profile).toBe('mikey')
-  expect(tab.note).toMatch(/tab of the fuuk app window: open fuuk \(or "window"\)/)
-  expect(chooseOpenProfile('Default', 'mikey', 'fuuk')).toEqual({ profile: 'default', why: '', note: '' })
-  expect(chooseOpenProfile('window', 'mikey', 'fuuk').profile).toBe('fuuk')
-  expect(chooseOpenProfile('window', 'mikey', '').error).toMatch(/can't tell which Claude app window/)
+  expect(chooseOpenProfile('', 'studio', 'studio')).toEqual({ profile: 'studio', why: "this session's own profile, as none was named", note: '' })
+  expect(chooseOpenProfile(undefined, 'team', '').profile).toBe('team')
+  expect(chooseOpenProfile(' Here ', 'team', '').profile).toBe('team')
+  const tab = chooseOpenProfile('', 'team', 'studio')
+  expect(tab.profile).toBe('team')
+  expect(tab.note).toMatch(/tab of the studio app window: open studio \(or "window"\)/)
+  expect(chooseOpenProfile('Default', 'team', 'studio')).toEqual({ profile: 'default', why: '', note: '' })
+  expect(chooseOpenProfile('window', 'team', 'studio').profile).toBe('studio')
+  expect(chooseOpenProfile('window', 'team', '').error).toMatch(/can't tell which Claude app window/)
   expect(parseOpenArgs(['--model', 'sonnet', 'hi'])).toEqual({ profile: '', model: 'sonnet', permissionMode: '', openIn: '', message: 'hi' })
 })
 
 test('from a tab of another account\'s window, open picks this session\'s profile unless one is named', async ($, on) => {
   const typed: any[] = []
   const walks: any[] = []
-  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-mikey', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }, (e: any) => {
-    if (e.argv[0] === 'powershell.exe') { walks.push(e.argv); return { ...RAN_OK, stdout: IN_FUUK } }
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-team', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }, (e: any) => {
+    if (e.argv[0] === 'powershell.exe') { walks.push(e.argv); return { ...RAN_OK, stdout: IN_STUDIO } }
     return RAN_OK
   })
   on('tool.call', { tool: 'mcp__terminal__run_in_terminal' }, (_: any, e: any) => { typed.push(e); return { result: [{ type: 'text', text: 'Started' }] } })
   on('clock.sleep', () => ({ value: undefined }))
-  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey', fuuk: 'claude fuuk' } }))
+  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { team: 'claude team', studio: 'claude studio' } }))
   await $.session.start(START)
   await say($, 'open-in panel')
   const listed: any = await $.tool.call({ tool: 'mcp__crosstalk__list' } as never)
-  expect(JSON.stringify(listed)).toMatch(/You are mikey\/proj-self, in the fuuk app window\./)
+  expect(JSON.stringify(listed)).toMatch(/You are team\/proj-self, in the studio app window\./)
   expect(walks).toHaveLength(1)
   expect(walks[0].at(-1)).not.toMatch(/"/) // no double quotes to survive Windows quoting
   const unnamed: any = await $.tool.call({ tool: 'mcp__crosstalk__open', message: 'hi' } as never)
-  expect(JSON.stringify(unnamed)).toMatch(/Opening mikey \(claude mikey\) in a new tab of the fuuk app window's Terminal panel\. mikey is this session's own profile, as none was named\. This session runs in a tab of the fuuk app window/)
-  expect(typed.at(-1).command).toMatch(/; claude mikey$/)
-  const named: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'fuuk' } as never)
-  expect(JSON.stringify(named)).toMatch(/Opening fuuk \(claude fuuk\)/)
+  expect(JSON.stringify(unnamed)).toMatch(/Opening team \(claude team\) in a new tab of the studio app window's Terminal panel\. team is this session's own profile, as none was named\. This session runs in a tab of the studio app window/)
+  expect(typed.at(-1).command).toMatch(/; claude team$/)
+  const named: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'studio' } as never)
+  expect(JSON.stringify(named)).toMatch(/Opening studio \(claude studio\)/)
   expect(JSON.stringify(named)).not.toMatch(/none was named/)
-  expect(await say($, 'open window')).toMatch(/Opening fuuk \(claude fuuk\).*fuuk is the account of the fuuk app window this session runs in/)
-  expect(typed.map((t) => t.command.split('; ').at(-1))).toEqual(['claude mikey', 'claude fuuk', 'claude fuuk'])
-  expect(JSON.parse(files.get(`${BOX}/sessions/self-1.json`)!).window).toBe('fuuk')
+  expect(await say($, 'open window')).toMatch(/Opening studio \(claude studio\).*studio is the account of the studio app window this session runs in/)
+  expect(typed.map((t) => t.command.split('; ').at(-1))).toEqual(['claude team', 'claude studio', 'claude studio'])
+  expect(JSON.parse(files.get(`${BOX}/sessions/self-1.json`)!).window).toBe('studio')
 })
 
 test('outside the app no process walk runs, and "window" says it can\'t tell', async ($, on) => {
@@ -1297,38 +1297,38 @@ test('outside the app no process walk runs, and "window" says it can\'t tell', a
 // ---- Open where you are, shorter commands, notifications that open their own window ----
 
 test('a profile is told as people say it, and open takes --in', async () => {
-  expect(['fuuk', 'claude-fuuk', 'claude fuuk', 'the fuuk app', 'my Work account', 'claude', 'main'].map(profileWord))
-    .toEqual(['fuuk', 'fuuk', 'fuuk', 'fuuk', 'work', 'default', 'default'])
-  expect(parseOpenArgs(['claude', 'fuuk', '--in', 'window', 'hi'])).toMatchObject({ profile: 'claude-fuuk', openIn: 'window', message: 'hi' })
-  expect(parseOpenArgs(['fuuk', '--in', 'nowhere']).error).toMatch(/--in takes/)
+  expect(['studio', 'claude-studio', 'claude studio', 'the studio app', 'my Work account', 'claude', 'main'].map(profileWord))
+    .toEqual(['studio', 'studio', 'studio', 'studio', 'work', 'default', 'default'])
+  expect(parseOpenArgs(['claude', 'studio', '--in', 'window', 'hi'])).toMatchObject({ profile: 'claude-studio', openIn: 'window', message: 'hi' })
+  expect(parseOpenArgs(['studio', '--in', 'nowhere']).error).toMatch(/--in takes/)
   expect(chooseOpenIn('panel', undefined, '', false, 'VS Code', true)).toEqual({ where: 'panel' })
   expect(chooseOpenIn('editor', undefined, 'vscode', true)).toEqual({ where: 'vscode' })
 })
 
-// A mikey session in the app, with fuuk's app window on disk and the plugin's scripts in place.
+// A team session in the app, with studio's app window on disk and the plugin's scripts in place.
 function inAppWindows(on: any, extraEnv: Record<string, string> = {}, hasHost = false) {
   const calls: any[] = []
   const typed: any[] = []
-  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-mikey', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', ...extraEnv }, (e: any) => {
+  const files: any = fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-team', CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', ...extraEnv }, (e: any) => {
     calls.push(e.argv)
-    if (e.argv[0] === 'powershell.exe' && e.argv.includes('-Command')) return { ...RAN_OK, stdout: IN_FUUK }
+    if (e.argv[0] === 'powershell.exe' && e.argv.includes('-Command')) return { ...RAN_OK, stdout: IN_STUDIO }
     return RAN_OK
   })
   if (hasHost) files.set(`${BOX}/app-windows/ToastHost.exe`, '')
   on('tool.call', { tool: 'mcp__terminal__run_in_terminal' }, (_: any, e: any) => { typed.push(e); return { result: [{ type: 'text', text: 'Started' }] } })
   on('clock.sleep', () => ({ value: undefined }))
-  files.set('C:/home/.claude-fuuk-app/Preferences', '{}')
-  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { mikey: 'claude mikey', fuuk: 'claude fuuk' } }))
+  files.set('C:/home/.claude-studio-app/Preferences', '{}')
+  files.set(`${BOX}/setup.json`, JSON.stringify({ launch: { team: 'claude team', studio: 'claude studio' } }))
   return { calls, typed, files }
 }
 
 test('from the app on Windows, open starts the session in the named profile\'s own app window', async ($, on) => {
   const { calls, typed, files } = inAppWindows(on)
   await $.session.start(START)
-  const opened: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'claude fuuk', message: 'review the diff' } as never)
-  expect(JSON.stringify(opened)).toMatch(/Opened fuuk in fuuk's Claude app window\. Its first message was sent/)
+  const opened: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'claude studio', message: 'review the diff' } as never)
+  expect(JSON.stringify(opened)).toMatch(/Opened studio in studio's Claude app window\. Its first message was sent/)
   const run = calls.find((a) => a.includes('-File') && /claude-new-session\.ps1$/.test(a[a.indexOf('-File') + 1]))!
-  expect(run.slice(run.indexOf('-File') + 2, run.indexOf('-File') + 4)).toEqual(['fuuk', 'C:\\code\\proj'])
+  expect(run.slice(run.indexOf('-File') + 2, run.indexOf('-File') + 4)).toEqual(['studio', 'C:\\code\\proj'])
   expect(run).toContain('-Send')
   const promptFile = run[run.indexOf('-PromptFile') + 1]
   expect(files.get(slash(promptFile))).toMatch(/^\[Crosstalk\] .*opened this session\. It says:\n\nreview the diff$/)
@@ -1345,16 +1345,16 @@ test('a spare session opens in its project folder, from the app file, not its te
   const calls: any[] = []
   const files: any = fakeDisk(on, { ...APP_ENV, CLAUDE_CODE_ENTRYPOINT: 'claude-desktop', TEST_CWD: SPARE }, (e: any) => { calls.push(e.argv); return RAN_OK })
   on('clock.sleep', () => ({ value: undefined }))
-  files.set('C:/home/.claude-fuuk-app/Preferences', '{}')
+  files.set('C:/home/.claude-studio-app/Preferences', '{}')
   const appPath = `${APP}/claude-code-sessions/acct/org/local_abc-1.json`
   files.set(appPath, JSON.stringify({ sessionId: 'local_abc-1', cliSessionId: 'self-1', title: 'Spare', cwd: 'C:\\code\\real', originCwd: 'C:\\code\\real' }))
   await $.session.start({ ...START, cwd: SPARE })
-  expect(JSON.stringify(await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'fuuk', message: 'hi' } as never))).toMatch(/Opened fuuk in fuuk's Claude app window/)
+  expect(JSON.stringify(await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'studio', message: 'hi' } as never))).toMatch(/Opened studio in studio's Claude app window/)
   const run = calls.find((a) => a.some((x: string) => /claude-new-session\.ps1$/.test(x)))!
-  expect(run[run.indexOf('fuuk') + 1]).toBe('C:\\code\\real')
+  expect(run[run.indexOf('studio') + 1]).toBe('C:\\code\\real')
   // Without a project folder on record, it says so instead of handing the app a folder that is gone.
   files.set(appPath, JSON.stringify({ sessionId: 'local_abc-1', cliSessionId: 'self-1', title: 'Spare', cwd: SPARE }))
-  expect(JSON.stringify(await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'fuuk', message: 'hi' } as never))).toMatch(/temporary folder the app made/)
+  expect(JSON.stringify(await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'studio', message: 'hi' } as never))).toMatch(/temporary folder the app made/)
 })
 
 test('a profile with no app window yet is said, not guessed at, and --in panel still works', async ($, on) => {
@@ -1369,10 +1369,10 @@ test('a profile with no app window yet is said, not guessed at, and --in panel s
 test('a profile\'s name works as a command, and to sends without the model', async ($, on) => {
   const { calls, files } = inAppWindows(on)
   await $.session.start(START)
-  files.set(`${BOX}/sessions/other.json`, JSON.stringify({ id: 'other', profile: 'fuuk', address: 'fuuk/x-oth', cwd: 'y', seenAt: NOW }))
-  expect(await say($, 'fuuk look at the build')).toMatch(/Opened fuuk in fuuk's Claude app window/)
+  files.set(`${BOX}/sessions/other.json`, JSON.stringify({ id: 'other', profile: 'studio', address: 'studio/x-oth', cwd: 'y', seenAt: NOW }))
+  expect(await say($, 'studio look at the build')).toMatch(/Opened studio in studio's Claude app window/)
   expect(calls.some((a) => a.includes('-PromptFile'))).toBe(true)
-  expect(await say($, 'to fuuk check the build')).toMatch(/^Sent to fuuk\/x-oth/)
+  expect(await say($, 'to studio check the build')).toMatch(/^Sent to studio\/x-oth/)
   expect([...files.keys()].some((k: string) => k.startsWith(`${BOX}/inbox/other/`))).toBe(true)
   expect(await say($, 'to')).toMatch(/^Usage: \/crosstalk to/)
   expect(await say($, 'help')).toMatch(/\/crosstalk where/)
@@ -1389,8 +1389,8 @@ test('a session in an account window raises a notification that opens that windo
   await $.turn.complete({ turnId: 't1', reason: 'answer', answer: 'done' } as never)
   await settle()
   const toast = calls.find((a) => a.includes('-File') && /claude-toast\.ps1$/.test(a[a.indexOf('-File') + 1]))!
-  expect(toast.slice(toast.indexOf('-File') + 2, toast.indexOf('-File') + 4)).toEqual(['fuuk', 'local_abc-123'])
-  expect(toast.at(-1)).toBe('fuuk: finished')
+  expect(toast.slice(toast.indexOf('-File') + 2, toast.indexOf('-File') + 4)).toEqual(['studio', 'local_abc-123'])
+  expect(toast.at(-1)).toBe('studio: finished')
   expect(toast[toast.indexOf('-File') + 1]).toBe(`C:/home/.claude-crosstalk/app-windows/claude-toast.ps1`) // the built copy, not the plugin's
 })
 

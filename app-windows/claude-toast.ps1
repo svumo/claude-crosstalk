@@ -1,7 +1,7 @@
 # Shows a Windows notification for a session in an account's Claude window. Clicking it opens that
 # window on that session (claude-open-link.ps1), where the app's own notification would open the
 # main window's last session. Windows PowerShell 5.1 or 7.
-#   claude-toast.ps1 fuuk local_1234-abcd "Fix the login page" "Needs your approval"
+#   claude-toast.ps1 studio local_1234-abcd "Fix the login page" "Needs your approval"
 # Skipped when that window is the one in front. The notification is "Claude (<name>)", a name
 # install.ps1 gives the window.
 #

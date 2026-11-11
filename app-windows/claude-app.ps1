@@ -13,7 +13,7 @@ param(
 . (Join-Path $PSScriptRoot 'claude-common.ps1')
 
 if ($Name -notmatch '^[A-Za-z0-9][A-Za-z0-9_-]{0,30}$' -or $Name -in 'default', 'main') {
-    Write-Error "Give a profile name such as work or fuuk (the main window is the app as you normally start it)."; exit 1
+    Write-Error "Give a profile name such as work or studio (the main window is the app as you normally start it)."; exit 1
 }
 $exe = Find-ClaudeExe
 if (-not $exe) { Write-Error "Claude desktop app not found (looked for the Microsoft Store copy and %LOCALAPPDATA%\AnthropicClaude)."; exit 1 }

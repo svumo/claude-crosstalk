@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.9.1
+
+**A README that matches 1.9, with generic examples**
+- The README is rewritten, shorter, for how Crosstalk works now. A new **Opening sessions** table shows where `open` goes from each place: the profile's own app window in the desktop app on Windows, a Terminal-panel tab on macOS and Linux, an editor tab, a tab of the Windows Terminal window you're in, or a new window. The `open` tool's `profile` is shown as optional, the Settings table lists `panel` and `editor`, and Development lists `npm run typecheck` and `npm run test:sidecar`.
+- Examples across the code, tests, scripts and docs use generic profiles (`work`, `personal`, `team`, `studio`) and folders (`C:\code\my-app`) instead of personal ones.
+- Crosstalk's own messages, the desktop-app guide and the Copilot guide say `/crosstalk where` instead of the old `open-in` (which still works). Its usage line now says what `auto` does since 1.8.0.
+
 ## 1.9.0
 
 **Watch a Copilot task live (Phase 2 of 5: in a terminal)**
@@ -55,14 +62,14 @@
 ## 1.8.1
 
 - A session the app started ahead of time (a "spare") runs in a temporary folder that the app deletes once the session is in use. `open` now opens in the project folder from the session's app record instead, so it no longer fails with "No such folder: ...\spares\spare-...". If the project folder can't be found it says so.
-- Each window's notification name ("Claude (mikey)") is set up front, on the Start-menu shortcut of that name.
+- Each window's notification name ("Claude (team)") is set up front, on the Start-menu shortcut of that name.
 
 ## 1.8.0
 
 **`open` goes where you are, and never somewhere else**
-- From a Claude desktop app session on Windows, `open fuuk` starts a Code session in **fuuk's own app window** (`default` is the main window), with the folder and your first message filled in and sent. Before, it typed a command into a Terminal-panel tab of the window you were in. Use `--in panel` for the old behaviour. A profile with no app window yet is told plainly, with how to make one.
+- From a Claude desktop app session on Windows, `open studio` starts a Code session in **studio's own app window** (`default` is the main window), with the folder and your first message filled in and sent. Before, it typed a command into a Terminal-panel tab of the window you were in. Use `--in panel` for the old behaviour. A profile with no app window yet is told plainly, with how to make one.
 - From a VS Code or VSCodium terminal, it opens a tab in that editor. If the Crosstalk terminal helper isn't installed there, `open` installs it from the plugin and tells you to reload the window once, instead of opening a terminal window you didn't ask for. A terminal window is used only outside an editor or when you ask (`--in window`).
-- Profiles are understood as people say them: `fuuk`, `claude-fuuk`, `claude fuuk`, "the fuuk app".
+- Profiles are understood as people say them: `studio`, `claude-studio`, `claude studio`, "the studio app".
 
 **Shorter commands**
 - `/crosstalk <profile> [message]` opens a session. `/crosstalk to <who> <message>` sends without a model turn. `/crosstalk where` shows or sets where `open` puts a session (it replaces `open-in` and takes `panel` and `editor` too). `/crosstalk help` lists the rest; plain `/crosstalk` is now short. The old commands still work.
@@ -75,7 +82,7 @@
 
 **Sessions know their window, and `open` needs no profile**
 - `open` no longer needs a profile. With none, it starts this session's own profile, so "open a different session" stays on the account you're working in. A profile you name still wins.
-- On Windows, Crosstalk finds the desktop-app window a session runs in from its parent processes. A Terminal-panel tab counts as its window's, so a `mikey` session in a tab of the `fuuk` window is "in the fuuk app window". `list` and `/crosstalk` show it, and `/crosstalk open window` (or the `open` tool with `profile: "window"`) starts that window's account. If the window can't be found, Crosstalk says so and doesn't guess. `CLAUDE_CROSSTALK_WINDOW` overrides it.
+- On Windows, Crosstalk finds the desktop-app window a session runs in from its parent processes. A Terminal-panel tab counts as its window's, so a `team` session in a tab of the `studio` window is "in the studio app window". `list` and `/crosstalk` show it, and `/crosstalk open window` (or the `open` tool with `profile: "window"`) starts that window's account. If the window can't be found, Crosstalk says so and doesn't guess. `CLAUDE_CROSSTALK_WINDOW` overrides it.
 - `claude-new-session.ps1 here ...` opens in the window you're in, and `-DryRun` shows which window it would use and why, without opening anything. The `move-chat` skill uses `here` for "use a different session", and asks which account to use when the reason is a usage limit and you didn't name one.
 
 ## 1.7.0

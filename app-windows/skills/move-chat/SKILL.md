@@ -7,7 +7,7 @@ argument-hint: "[profile, default, or here]  [what the next session should focus
 ## Which window
 
 - The user named an account ("move this to work"): use that profile. A named account always wins.
-- The user named none ("use a different session", "start a new chat for this"): use `here`. The script then picks the app window this session runs in, which is the one the user is looking at. A Terminal-panel tab counts as the window it is a tab of, so a mikey session in a tab of the fuuk window gets the fuuk window. Outside the app it picks this session's own profile's window.
+- The user named none ("use a different session", "start a new chat for this"): use `here`. The script then picks the app window this session runs in, which is the one the user is looking at. A Terminal-panel tab counts as the window it is a tab of, so a team session in a tab of the studio window gets the studio window. Outside the app it picks this session's own profile's window.
 - The reason is a usage limit and no account was named: `here` would land on the same account, so ask which account to use. Don't guess one.
 - To check without opening anything, add `-DryRun`. It prints the window it would use and why.
 

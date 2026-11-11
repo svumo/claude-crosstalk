@@ -21,7 +21,7 @@ Do this whichever option you pick.
 
 ## Where `open` goes from the app
 
-On Windows, a session in the app opens other profiles **in their own app window** (option B below), not in a tab. `/crosstalk open fuuk review the diff` starts a Code session in fuuk's window and sends the message. `default` is the main window. If a profile has no window yet, Crosstalk says so; `--in panel` uses a Terminal-panel tab instead (option A). On macOS and Linux the app has one window, so `open` uses a Terminal-panel tab.
+On Windows, a session in the app opens other profiles **in their own app window** (option B below), not in a tab. `/crosstalk open studio review the diff` starts a Code session in studio's window and sends the message. `default` is the main window. If a profile has no window yet, Crosstalk says so; `--in panel` uses a Terminal-panel tab instead (option A). On macOS and Linux the app has one window, so `open` uses a Terminal-panel tab.
 
 ## Notifications that open the right window
 
@@ -43,9 +43,9 @@ What has to be true:
 - **The launch command works in your shell.** The panel runs your normal PowerShell (or login shell on macOS) with your profile loaded. The default command is `claude-<profile>`. If you start profiles another way, tell Crosstalk once: `/crosstalk launch work claude work`.
 - **The command is a plain one-liner.** The app's Terminal tool won't type variables, pipes or `$( )`. Wrap anything fancier in a function in your shell profile and launch that.
 
-**Which account.** A profile you name always wins. With none (`/crosstalk open`, or "open a different session"), it opens this session's own profile, the account you're working in. A Terminal-panel tab can run one account inside another account's window, such as a `mikey` session in a tab of the `fuuk` window. Crosstalk finds the window from the session's parent processes, so `list` says "in the fuuk app window". `/crosstalk open window` opens that window's account. If Crosstalk can't tell the window, it says so and doesn't guess. Set `CLAUDE_CROSSTALK_WINDOW` to override it.
+**Which account.** A profile you name always wins. With none (`/crosstalk open`, or "open a different session"), it opens this session's own profile, the account you're working in. A Terminal-panel tab can run one account inside another account's window, such as a `team` session in a tab of the `studio` window. Crosstalk finds the window from the session's parent processes, so `list` says "in the studio app window". `/crosstalk open window` opens that window's account. If Crosstalk can't tell the window, it says so and doesn't guess. Set `CLAUDE_CROSSTALK_WINDOW` to override it.
 
-To see what `open` will do from a session, run `/crosstalk open-in`. To go back to separate terminal windows, use `/crosstalk open-in window`.
+To see what `open` will do from a session, run `/crosstalk where`. To go back to separate terminal windows, use `/crosstalk where window`.
 
 ## B. A second app window per account (Windows)
 
