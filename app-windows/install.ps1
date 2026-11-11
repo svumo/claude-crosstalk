@@ -1,6 +1,6 @@
 # Installs the app-windows scripts and the move-chat skill.
 #   install.ps1                         copy the scripts, and the skill into every profile
-#   install.ps1 -Shortcuts work,fuuk    also make a Start-menu shortcut "Claude (<name>)" for each
+#   install.ps1 -Shortcuts work,studio    also make a Start-menu shortcut "Claude (<name>)" for each
 #   install.ps1 -WhatIf                 only say what it would do
 #   install.ps1 -Uninstall              remove the notification names Crosstalk registered
 # The scripts go to Crosstalk's shared folder (CLAUDE_CROSSTALK_DIR, default ~\.claude-crosstalk)

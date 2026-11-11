@@ -298,7 +298,7 @@ async function crosstalkCommand($, args) {
   if (word === "help") {
     return { text: HELP };
   }
-  // /crosstalk fuuk fix the tests: a profile's name where a command would be means open it.
+  // /crosstalk studio fix the tests: a profile's name where a command would be means open it.
   if (word !== "" && (await isKnownProfile($, profileWord(word)))) {
     const parts = parseOpenArgs(words);
     if (parts.error) {
@@ -362,7 +362,7 @@ async function isKnownProfile($, name) {
 // /crosstalk to <who> <message>: the send tool, without a turn to ask the model.
 async function toCommand($, who, text) {
   if (who === "" || text.trim() === "") {
-    return "Usage: /crosstalk to <who> <message>, such as /crosstalk to fuuk check the build. <who> is an address, a session's title or a profile with one session running.";
+    return "Usage: /crosstalk to <who> <message>, such as /crosstalk to studio check the build. <who> is an address, a session's title or a profile with one session running.";
   }
   if (text.length > MAX_TEXT) {
     return `The message is ${text.length} characters; the most is ${MAX_TEXT}.`;
@@ -749,7 +749,7 @@ function describeOpening(r, pluginRoot) {
   }
   const where = r.choice.where === "vscode" ? `a ${r.editor.label} terminal tab` : "a new terminal window";
   const how = { CLAUDE_CROSSTALK_EDITOR: "set by CLAUDE_CROSSTALK_EDITOR", saved: "set by /crosstalk editor", spotted: r.inEditor ? "spotted from this session's terminal" : "the default, as this session isn't in an editor terminal" }[r.editor.how];
-  const lines = [`From this session, open starts ${where}.`, `Editor: ${r.editor.label} (${how}). Helper: ${!r.checked ? `not checked, as open-in is ${r.choice.why === NOT_IN_APP ? "app" : "window"}` : r.helper ? "installed" : "not found"}.`];
+  const lines = [`From this session, open starts ${where}.`, `Editor: ${r.editor.label} (${how}). Helper: ${!r.checked ? `not checked, as where is ${r.choice.why === NOT_IN_APP ? "app" : "window"}` : r.helper ? "installed" : "not found"}.`];
   if (r.choice.why) {
     lines.push(`Why a window: ${r.choice.why}.`);
   }
@@ -767,7 +767,7 @@ async function openInCommand($, value) {
     return `New sessions open in: ${setup.openIn ?? "auto"}${fromEnv ? ` (CLAUDE_CROSSTALK_OPEN_IN=${fromEnv} wins)` : ""}. Choices: ${OPEN_IN.join(", ")}.\n${now}`;
   }
   if (!OPEN_IN.includes(value)) {
-    return `Usage: /crosstalk open-in ${OPEN_IN.join("|")}. auto is a tab in the Claude desktop app's Terminal panel when this session runs in the app, an editor tab (VS Code or VSCodium) when it runs in one, else a new terminal window.`;
+    return `Usage: /crosstalk where ${OPEN_IN.join("|")}. auto is the profile's own Claude app window (on Windows; a Terminal-panel tab elsewhere) when this session runs in the app, an editor tab (VS Code or VSCodium) when it runs in one, else a terminal window or, in Windows Terminal, a new tab of it.`;
   }
   setup.openIn = value;
   await saveSetup($, setup);
@@ -959,10 +959,10 @@ async function openSession($, given, message, opts = {}) {
 
 // A new tab in the Claude desktop app's Terminal panel, through the app's own tool, so the
 // session runs inside the app on that profile's account. The app shows the person the command to
-// approve. Its shell runs their profile, so `claude mikey`-style functions work there. Returns {}
+// approve. Its shell runs their profile, so `claude team`-style functions work there. Returns {}
 // or { error }.
 async function openInApp($, profile, command) {
-  const instead = "/crosstalk open-in window opens a terminal window instead.";
+  const instead = "/crosstalk where window opens a terminal window instead.";
   let answer;
   try {
     answer = await $.tool.call({ tool: APP_TERMINAL, command, cwd: openFolder ?? me.cwd, title: `claude ${profile}` });
@@ -1242,7 +1242,7 @@ async function startUp($) {
   });
   await $.tool.register({
     name: "open",
-    description: "Start a new Claude Code session on a profile in this session's folder, with an optional first message. Pass the profile the person named, as they said it (fuuk, \"claude fuuk\", \"the work app\"); leave it out for \"another session\" with no account named. Do not choose where it opens: Crosstalk opens it in the same place this session runs (that profile's own Claude app window, the VS Code or VSCodium terminal, or a terminal window). `model` and `permissionMode` are optional.",
+    description: "Start a new Claude Code session on a profile in this session's folder, with an optional first message. Pass the profile the person named, as they said it (studio, \"claude studio\", \"the work app\"); leave it out for \"another session\" with no account named. Do not choose where it opens: Crosstalk opens it in the same place this session runs (that profile's own Claude app window, the VS Code or VSCodium terminal, or a terminal window). `model` and `permissionMode` are optional.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1258,7 +1258,7 @@ async function startUp($) {
   await $.tool.register({
     name: "crosstalk",
     description: "Run a /crosstalk command. `args` is everything after /crosstalk: empty shows who Crosstalk can reach; or <profile> [message], open <profile> [message], to <who> <message>, where|open-in [place], setup, add <profile>, editor [name], usage, move <profile>, launch <profile> [message], on, off, help.",
-    inputSchema: { type: "object", properties: { args: { type: "string", description: "Everything after /crosstalk, e.g. \"help\" or \"to fuuk/test-61dd hello\"" } }, required: ["args"] },
+    inputSchema: { type: "object", properties: { args: { type: "string", description: "Everything after /crosstalk, e.g. \"help\" or \"to studio/test-61dd hello\"" } }, required: ["args"] },
     isDeferred: false,
   });
   await $.command.register({ name: "crosstalk", description: "Shows who Crosstalk can reach. <profile> [message] opens a session on that profile where you are; to <who> <message> sends; where shows or sets where open puts it; setup connects profiles; help lists the rest." });

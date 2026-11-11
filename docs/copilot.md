@@ -43,7 +43,7 @@ Sending a follow-up is an ordinary Crosstalk message to the task (`/crosstalk to
 
 `/crosstalk-gh open` opens a terminal on the task: what Copilot says and thinks, its plan, each tool it runs with the exact command, and a diff of every file it changes. With no task named it opens the running one, or the newest when none runs; a task that has ended is replayed.
 
-In the Claude desktop app it is a new tab of the app's Terminal panel (the app asks you to approve the command first); elsewhere, or with `/crosstalk open-in window`, a terminal window: Windows Terminal, Terminal.app, or the first Linux terminal found. If neither works, the answer gives the command to run yourself:
+In the Claude desktop app it is a new tab of the app's Terminal panel (the app asks you to approve the command first); elsewhere, or with `/crosstalk where window`, a terminal window: Windows Terminal, Terminal.app, or the first Linux terminal found. If neither works, the answer gives the command to run yourself:
 
 ```
 node <plugin folder>/copilot/tui/attach.ts <task> --root ~/.claude-crosstalk

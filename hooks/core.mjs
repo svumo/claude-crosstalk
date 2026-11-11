@@ -66,7 +66,7 @@ export function listLine(record) {
   return title ? `${title} (${record.address}, ${where})` : `${record.address} (${where})`;
 }
 
-// ", in the fuuk app window" for a session known to run in one, else "".
+// ", in the studio app window" for a session known to run in one, else "".
 export function windowNote(record) {
   const name = clean(record?.window);
   return name ? `, in the ${name} app window` : "";
@@ -331,7 +331,7 @@ export function withLaunchFlags(command, { model, permissionMode } = {}) {
 // after the profile, as `--model m` or `--model=m`. Returns the parts, or { error }.
 export function parseOpenArgs(words) {
   let all = (words ?? []).map(String);
-  // "claude fuuk" is the fuuk profile, as people say it.
+  // "claude studio" is the studio profile, as people say it.
   if (all[0]?.toLowerCase() === "claude" && all[1] && !all[1].startsWith("--")) {
     all = [`claude-${all[1]}`, ...all.slice(2)];
   }
@@ -455,7 +455,7 @@ export function appWindowOf(path, commandLine) {
 
 // The app window this session runs in: the nearest app window among its parent processes, given
 // nearest first as { path, commandLine }. A Terminal-panel tab runs under the window it is a tab
-// of, so a mikey session in a tab of the fuuk window is in the fuuk window. "" when none is.
+// of, so a team session in a tab of the studio window is in the studio window. "" when none is.
 export function hostWindow(parents) {
   for (const p of parents ?? []) {
     const name = appWindowOf(p?.path, p?.commandLine);
@@ -478,7 +478,7 @@ export function parseParents(stdout) {
   });
 }
 
-// A profile as people say it: "fuuk", "claude-fuuk", "claude fuuk", "the fuuk app", "my fuuk account".
+// A profile as people say it: "studio", "claude-studio", "claude studio", "the studio app", "my studio account".
 // Filler words go; what is left is the name. "claude" alone is the default profile.
 export function profileWord(text) {
   const words = String(text ?? "").trim().toLowerCase().split(/\s+/).filter(Boolean);

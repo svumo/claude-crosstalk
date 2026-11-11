@@ -1,6 +1,6 @@
 # Opens an app window on one of its sessions. Windows runs this when a Crosstalk notification is
 # clicked: the protocol crosstalk-window:// (registered by install.ps1) hands it the link.
-#   claude-open-link.ps1 "crosstalk-window://open?window=fuuk&session=local_1234-abcd"
+#   claude-open-link.ps1 "crosstalk-window://open?window=studio&session=local_1234-abcd"
 # Only a plain profile name and an app session id are taken (the shapes the app's own claude://
 # links accept); anything else is refused, as any web page or program can start this link.
 param([Parameter(Mandatory)][string]$Url)
