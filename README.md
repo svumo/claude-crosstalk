@@ -23,6 +23,7 @@
   <a href="#multiple-claude-accounts">Multiple accounts</a> ·
   <a href="#what-it-works-with">Providers</a> ·
   <a href="#how-it-works">How it works</a> ·
+  <a href="#handing-work-to-github-copilot-cli">Copilot</a> ·
   <a href="#costs-and-safety">Costs and safety</a>
 </p>
 
@@ -79,8 +80,11 @@ Just ask, in plain words:
 | `/crosstalk setup` | Shows your profiles and what setup would do. Changes nothing |
 | `/crosstalk setup yes` | Does it |
 | `/crosstalk add <name>` | Makes a new profile, ready to log in to |
-| `/crosstalk open [profile] [--model m] [--mode p] [message]` | Starts a session on that profile in a new terminal, in this folder, and sends it your message once it's up. With no profile, it uses this session's own. `window` uses the account of the desktop-app window this session runs in. `--model` and `--mode` set its model and permission mode |
-| `/crosstalk open-in auto\|app\|vscode\|window` | Where `open` starts it. `auto` is a tab in the Claude desktop app's Terminal panel when you're in the app, an editor tab when you're in VS Code or VSCodium, else a new window. On its own, `/crosstalk open-in` says what `open` will do from this session and why |
+| `/crosstalk <profile> [message]` | Starts a session on that profile where you are, in this folder, and sends it your message once it's up. Same as `open` |
+| `/crosstalk open [profile] [--model m] [--mode p] [--in app\|panel\|editor\|window] [message]` | The long form. With no profile, it uses this session's own. `window` uses the account of the desktop-app window this session runs in. `--model` and `--mode` set its model and permission mode, `--in` where it opens |
+| `/crosstalk to <who> <message>` | Sends a message to a running session, without a model turn |
+| `/crosstalk where [auto\|app\|panel\|editor\|window]` | Where `open` starts a session. `auto` is the profile's own window in the Claude desktop app, an editor tab in VS Code or VSCodium, a tab of the Windows Terminal window you're in, else a new window. On its own it says what `open` will do from this session and why (`open-in` still works) |
+| `/crosstalk help` | Lists every command |
 | `/crosstalk editor auto\|code\|codium` | Which editor the tab opens in. `auto` spots VS Code or VSCodium from the terminal this session runs in |
 | `/crosstalk launch <profile> <command>` | The command that starts a profile, such as `claude zai`. Default: `claude-<profile>` |
 | `/crosstalk usage` | Each account's last known usage, and where this session stops and why (see Usage guard) |
@@ -285,6 +289,17 @@ A session that stops early stops alone. It doesn't tell the rest of the account 
 - If the old session stopped near its limit (the guard's own move, or `/crosstalk move` while over), the new one is told it owns the work alone. It shouldn't message the old one, which is paused and may not have enough usage left to answer, and it should ask you in its own chat if it gets stuck.
 - If the old session still has plenty of usage (a `/crosstalk move` well under the limit), the new one messages it only if it gets blocked or when it's done.
 - The `send` tool still delivers a message to a session that's paused for usage. Its reply says that session won't answer before its limit resets and suggests asking you instead. `list` marks such sessions "paused near its usage limit", and its first line shows this session's own usage. The `move-chat` skill uses that line to choose the same wording.
+
+## Handing work to GitHub Copilot CLI
+
+`/crosstalk-gh <task>` hands a task from a Claude session to GitHub Copilot CLI. Copilot works in its own git worktree and branch, cut from the commit you're on, so your checkout isn't touched, and the result comes back as a Crosstalk message with a diff stat, the branch and the commands to review, merge or discard it.
+
+- Copilot asks before it writes, runs a command or uses the network. Requests pop up in Claude Code's question dialog; `ask`, `auto` and `bypass` modes set how much goes through without asking.
+- `/crosstalk-gh open` watches a task live in a terminal and answers its requests with a key.
+- A purple `gh` ring among the skins meters shows the account's monthly Copilot AI credits.
+- Claude can run every `/crosstalk-gh` command itself, through the `crosstalk_gh` tool.
+
+It needs Node.js 22.18 or newer and Copilot signed in by you (`copilot login`); then run `/crosstalk-gh setup` once. Crosstalk handles no tokens. The full guide is [docs/copilot.md](docs/copilot.md).
 
 ## Costs and safety
 

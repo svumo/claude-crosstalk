@@ -1,0 +1,5 @@
+# Text files are stored with LF, whatever core.autocrlf is set to on the machine committing.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.vsix binary

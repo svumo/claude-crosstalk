@@ -469,7 +469,8 @@ async function openView($: Engine, given: Host, sessionId: string, named: string
   return `Opened ${state.task_id} in ${opened.place ?? "a new terminal"}.${ended} Keys there: y / a / n answer a request, s stops the task, q closes the view.`;
 }
 
-// Installing software is the person's call, so only a command they typed runs it (build choice).
+// Installing software is the person's call: only a command they typed, or this session's own
+// crosstalk_gh tool, runs it; a message from another session never does (build choice).
 async function runSetup($: Engine, root: string, origin: Origin): Promise<string> {
   if (!mayControl(origin)) {
     return "Only you can run /crosstalk-gh setup: type the command yourself.";
@@ -504,7 +505,8 @@ function modeList(current: Mode): string {
 }
 
 // Sets the mode new tasks start in and switches this session's running tasks (or the one named).
-// Handing out approvals is the person's call, so only a command they typed does it.
+// Handing out approvals is the person's call: only a command they typed, or this session's own
+// crosstalk_gh tool, does it.
 async function setMode($: Engine, root: string, sessionId: string, mode: Mode | "", named: string, origin: Origin): Promise<string> {
   if (!mayControl(origin)) {
     return "Only you can change Copilot's mode: type the command yourself.";

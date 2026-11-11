@@ -2,14 +2,14 @@
 
 Crosstalk can hand a task from a Claude Code session to GitHub Copilot CLI. Copilot works in its own git worktree and branch, asks you before it writes, runs a command or uses the network, and the result comes back to the session that asked as a Crosstalk message.
 
-This is **Phase 1**: it works from the command line and the transcript. A live terminal view, a chat of its own in the desktop app's sidebar, a pane and a status line come in later phases.
+This is **Phase 2**: it works from the command line and the transcript, with a live terminal view (`/crosstalk-gh open`) and a meter above the prompt. A chat of its own in the desktop app's sidebar and a pane come in later phases.
 
 ## What you need
 
 - A git repository with at least one commit.
 - Node.js 22.18 or newer (`node --version`).
 - Copilot signed in with your personal GitHub account: run `copilot login` yourself, in a terminal. Crosstalk never sees or stores a token.
-- Then, once: `/crosstalk-gh setup`. It installs the official Copilot SDK (`@github/copilot-sdk`, a pinned version, with npm install scripts off) into `~/.claude-crosstalk/copilot/runtime`, and checks who Copilot is signed in as. Nothing goes into your project or the plugin. Only you can run it: Claude can't run it for you.
+- Then, once: `/crosstalk-gh setup`. It installs the official Copilot SDK (`@github/copilot-sdk`, a pinned version, with npm install scripts off) into `~/.claude-crosstalk/copilot/runtime`, and checks who Copilot is signed in as. Nothing goes into your project or the plugin. You can type it, or ask Claude to run it through the `crosstalk_gh` tool.
 
 ## Two ways Copilot is driven
 
@@ -70,7 +70,7 @@ When Copilot wants to do something, a request shows in the transcript with exact
 | Use the network | high | that exact host |
 | Touch anything outside its worktree | high | nothing: each one is asked |
 
-Only you can answer. `/crosstalk-gh approve` works when you type it; Claude cannot run it for you, and no tool the model can call writes an answer.
+You answer, or Claude does when you ask it to: `/crosstalk-gh approve` works when you type it, and through the `crosstalk_gh` tool in this session. A message from another session or from Copilot itself can never answer a request.
 
 **If Copilot ever runs a tool without asking**, Crosstalk ends it on the spot and the reply says `STOPPED FOR SAFETY`, with the command that ran. Check the worktree before using anything from it. In `bypass` mode it's only logged, and the task carries on.
 

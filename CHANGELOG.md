@@ -35,6 +35,10 @@
 - **Fix:** clicking a notification switched the window to its session but left the window behind whatever you were in, as Windows won't let the app bring itself forward from a background launch. ToastHost, the program you clicked, now brings the window forward first. It logs each click's outcome to `toast-host.log`.
 - **Fix:** notifications lost the Claude logo when the app updated, since their shortcuts pointed into the old version's folder. The logo is now kept in Crosstalk's own folder (`app-windows\claude-logo.png` and `.ico`), copied again whenever the app updates, and shown beside the notification's text as well.
 
+**Housekeeping**
+- The README covers `/crosstalk-gh` and lists the short commands from 1.8.0 (`/crosstalk <profile>`, `to`, `where`, `help`). `docs/copilot.md` says that Claude can run `setup` and answer requests through the `crosstalk_gh` tool.
+- A `.gitattributes` keeps text files in LF, so a machine with `core.autocrlf` on can't rewrite whole files in a commit.
+
 ## 1.8.3
 
 **Moving at the usage limit is one question, and costs nothing**
