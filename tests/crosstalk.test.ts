@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import {
   addressOf, frameMessages, isLive, LIVE_MS, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, SHOW_TEXT, showMessages, toolResultCount, toolUseCount,
-  chooseOpenIn, editorFor, EDITORS, helperInstall, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, viaCmd, withLaunchFlags,
+  chooseOpenIn, editorFor, EDITORS, helperInstall, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, viaCmd, desktopLaunchArgv, encodedCommand, interactiveTaskScript, withLaunchFlags,
   linuxArgv, linuxCandidates, macArgv, parseOpenArgs, shQuote, userShell, whichArgv,
   appDataFolders, appPanelCommand, appTitle, cleanTitle, labelOf, listLine, projectFolderName, transcriptTitle,
   chosenProfile, choiceLabel, flagApplies, flagEnds, FLAG_MS, handoffName, isPaused, moveChoices, NOT_NOW, parsePercent, pausedNote,
@@ -711,6 +711,51 @@ test('open-in window opens a terminal window, and the setting is kept', async ($
   expect(calls.find(isWt)).toEqual(['cmd.exe', '/d', '/c', 'wt', '-w', 'new', '-d', 'C:\\code\\proj', 'pwsh', '-NoExit', '-Command', 'claude-zai'])
 })
 
+// powershell.exe -EncodedCommand: base64 of the script's UTF-16LE bytes.
+const decodeCommand = (b64: string) => {
+  const bytes = atob(b64)
+  let out = ''
+  for (let i = 0; i < bytes.length; i += 2) out += String.fromCharCode(bytes.charCodeAt(i) | (bytes.charCodeAt(i + 1) << 8))
+  return out
+}
+
+test('a launch from a session with no desktop is a one-shot interactive task that is always removed', async () => {
+  const argv = viaCmd(windowArgv('C:\\my code\\a & b', "claude zai --model opus", false, 'powershell'))
+  const script = interactiveTaskScript(argv)
+  expect(script).toMatch(/New-ScheduledTaskAction -Execute 'cmd\.exe' -Argument '\/d \/c wt -w new -d "C:\\my code\\a & b" powershell -NoExit -Command "claude zai --model opus"'/)
+  expect(script).toMatch(/-LogonType Interactive -RunLevel Limited/)
+  expect(script).toMatch(/finally \{\n {2}Unregister-ScheduledTask/)
+  expect(script).toMatch(/Is anyone signed in at the computer\?/)
+  expect(interactiveTaskScript(['cmd.exe', "it's"])).toMatch(/-Argument '"?it''s"?'/) // a quote in a literal is doubled
+  const launch = desktopLaunchArgv(argv)
+  expect(launch.slice(0, 4)).toEqual(['powershell.exe', '-NoProfile', '-NonInteractive', '-EncodedCommand'])
+  expect(decodeCommand(launch[4])).toBe(script)
+  expect(decodeCommand(encodedCommand('é€ \u{1F600} ok'))).toBe('é€ \u{1F600} ok')
+})
+
+test('from a session with no desktop, open starts the window on the desktop; from one with a desktop, it starts it directly', async ($, on) => {
+  const calls: any[] = []
+  let session = '0'
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', CLAUDE_CROSSTALK_OPEN_IN: 'window' }, (e: any) => {
+    calls.push(e.argv)
+    return e.argv.includes('(Get-Process -Id $PID).SessionId') ? { ...RAN_OK, stdout: `${session}\r\n` } : RAN_OK
+  })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open zai')).toMatch(/new terminal window on the desktop \(this session has no desktop of its own\)/)
+  expect(calls.some(isWt)).toBe(false) // wt is not started from the session that cannot show it
+  const task = calls.find((a) => a.includes('-EncodedCommand'))!
+  expect(task[0]).toBe('powershell.exe')
+  const script = decodeCommand(task[task.length - 1])
+  expect(script).toMatch(/-Argument '\/d \/c wt -w new -d C:\\code\\proj pwsh -NoExit -Command claude-zai'/)
+  expect(script).toMatch(/Register-ScheduledTask/)
+  calls.length = 0
+  session = '1'
+  expect(await say($, 'open zai')).toMatch(/new terminal window/)
+  expect(calls.some((a) => a.includes('-EncodedCommand'))).toBe(false)
+  expect(calls.some(isWt)).toBe(true)
+})
+
 test('a window opens in Windows PowerShell when pwsh is not installed', async ($, on) => {
   const calls: any[] = []
   fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', CLAUDE_CROSSTALK_OPEN_IN: 'window' }, (e: any) => {
@@ -1327,7 +1372,7 @@ test('outside the app no process walk runs, and "window" says it can\'t tell', a
   await $.session.start(START)
   expect(await say($, 'open window')).toMatch(/can't tell which Claude app window/)
   expect(await say($, 'open')).toMatch(/Opening work \(claude-work\) in a new terminal window\. work is this session's own profile/)
-  expect(calls.some((a) => a[0] === 'powershell.exe')).toBe(false)
+  expect(calls.some((a) => a[0] === 'powershell.exe' && !a.includes('(Get-Process -Id $PID).SessionId'))).toBe(false) // the only powershell.exe is the check for a desktop
 })
 
 // ---- Open where you are, shorter commands, notifications that open their own window ----

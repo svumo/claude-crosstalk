@@ -17,7 +17,7 @@ import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
   appPanelCommand, chooseOpenIn, DESKTOP_ENTRYPOINT, findOpened, HELPER_ID, isSafeLaunch, launchFor, NOT_IN_APP, OPEN_IN, PERMISSION_MODES, trustProject,
-  vscodeLink, editorFor, EDITOR_CHOICES, helperInstall, windowArgv, viaCmd, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
+  vscodeLink, editorFor, EDITOR_CHOICES, helperInstall, windowArgv, viaCmd, desktopLaunchArgv, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
   LINUX_TERMINALS, appDataFolders, appTitle, HOST_SESSION, labelOf, listLine, projectFolderName, transcriptTitle,
   choiceLabel, chosenProfile, COMPACT_INSTRUCTIONS, flagApplies, flagEnds, handoffName, handoffText, isOver, isPaused, LARGE_CONTEXT, LARGE_STOP,
   moveChoices, NOT_NOW, parsePercent, pausedNote, resumePrompt, stopLine, stopPoint, stopReason, summaryOf, USAGE_STOP, usagePhrase, windowKey, windowName, worstWindow,
@@ -930,9 +930,7 @@ async function openSession($, given, message, opts = {}) {
     place = `a new ${editor.label} terminal`;
     ran = await runCode($, pc, editor, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: openFolder ?? me.cwd, cmd: command }, editor.scheme)]);
   } else {
-    const opener = pc.isWindows
-      ? { argv: viaCmd(windowArgv(openFolder ?? me.cwd, command, resolved.inWt, await windowsShell($))), place: resolved.inWt ? "a new tab of this Windows Terminal window" : undefined }
-      : await unixWindow($, command);
+    const opener = pc.isWindows ? await windowsWindow($, openFolder ?? me.cwd, command, resolved.inWt) : await unixWindow($, command);
     if (opener.error) {
       return { error: opener.error };
     }
@@ -985,6 +983,23 @@ async function windowsShell($) {
   return found && found.exitCode === 0 ? "pwsh" : "powershell";
 }
 
+// True when this host runs in Windows session 0 (SSH, a service): no window can appear there.
+async function inServiceSession($) {
+  const ran = await $.process.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "(Get-Process -Id $PID).SessionId"], { timeoutMs: 20_000 }).catch(() => null);
+  return Boolean(ran && ran.exitCode === 0 && String(ran.stdout ?? "").trim() === "0");
+}
+
+// The Windows terminal window for a session: Windows Terminal through cmd.exe, in Windows
+// PowerShell when pwsh is missing; and, from a session with no desktop, started on the person's
+// desktop through a one-shot scheduled task. Returns { argv, place }.
+async function windowsWindow($, cwd, command, sameWindow = false) {
+  const argv = viaCmd(windowArgv(cwd, command, sameWindow, await windowsShell($)));
+  if (await inServiceSession($)) {
+    return { argv: desktopLaunchArgv(argv), place: "a new terminal window on the desktop (this session has no desktop of its own)", timeoutMs: 60_000 };
+  }
+  return { argv, place: sameWindow ? "a new tab of this Windows Terminal window" : undefined };
+}
+
 // A program that could not be started used to come back as null and a bare "Couldn't open ...".
 // Keep the reason, so the message says what went wrong.
 function keepError(run) {
@@ -1012,7 +1027,7 @@ async function openViewer($, command, cwd, title) {
       fellBack = ` (the Terminal panel couldn't be reached: ${String(err?.message ?? err).slice(0, 200)})`;
     }
   }
-  const opener = pc.isWindows ? { argv: viaCmd(windowArgv(cwd, command, false, await windowsShell($))) } : await unixWindow($, command, cwd);
+  const opener = pc.isWindows ? await windowsWindow($, cwd, command) : await unixWindow($, command, cwd);
   if (opener.error) {
     return { error: opener.error };
   }

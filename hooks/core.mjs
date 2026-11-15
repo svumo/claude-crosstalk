@@ -572,6 +572,50 @@ export function viaCmd(argv) {
   return ["cmd.exe", "/d", "/c", ...argv];
 }
 
+// A remote shell (SSH), a service or a scheduled job runs in Windows session 0, which has no
+// desktop: Windows Terminal crashes there and a console window dies at once. The person's desktop
+// is another session. A one-shot scheduled task that runs as them, interactive only, starts the
+// program on that desktop. `argv` is a cmd.exe command line (from viaCmd). The task is removed
+// afterwards; the script fails, with the reason, when nobody is signed in on the desktop.
+export function interactiveTaskScript(argv) {
+  const quote = (arg) => (/^[\w\-.:\\/=]+$/.test(arg) ? arg : `"${arg.replace(/"/g, '\\"')}"`);
+  const literal = (text) => `'${String(text).replace(/'/g, "''")}'`;
+  const [exe, ...args] = argv;
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    "$name = 'crosstalk-open-' + [guid]::NewGuid().ToString('N').Substring(0, 8)",
+    "$user = [Security.Principal.WindowsIdentity]::GetCurrent().Name",
+    "try {",
+    `  $action = New-ScheduledTaskAction -Execute ${literal(exe)} -Argument ${literal(args.map(quote).join(" "))}`,
+    "  $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited",
+    "  Register-ScheduledTask -TaskName $name -Action $action -Principal $principal | Out-Null",
+    "  Start-ScheduledTask -TaskName $name",
+    "  for ($i = 0; $i -lt 40; $i++) { Start-Sleep -Milliseconds 250; if ((Get-ScheduledTask -TaskName $name).State -ne 'Running') { break } }",
+    "  Start-Sleep -Seconds 2",
+    "  $result = (Get-ScheduledTaskInfo -TaskName $name).LastTaskResult",
+    "  if ($result -ne 0 -and $result -ne 267009) { throw ('the desktop did not start it (task result ' + $result + '). Is anyone signed in at the computer?') }",
+    "} finally {",
+    "  Unregister-ScheduledTask -TaskName $name -Confirm:$false -ErrorAction SilentlyContinue",
+    "}",
+  ].join("\n");
+}
+
+// powershell.exe -EncodedCommand takes the script as base64 of its UTF-16LE bytes, so no quoting
+// of the script survives to go wrong.
+export function encodedCommand(script) {
+  let bytes = "";
+  for (let i = 0; i < script.length; i++) {
+    const unit = script.charCodeAt(i);
+    bytes += String.fromCharCode(unit & 0xff, unit >> 8);
+  }
+  return btoa(bytes);
+}
+
+// The whole launch for a session that is not on the desktop.
+export function desktopLaunchArgv(argv) {
+  return ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", encodedCommand(interactiveTaskScript(argv))];
+}
+
 // macOS and Linux. A folder can hold any character, so it goes in single quotes; the command is
 // already held to plain words by isSafeLaunch.
 export const shQuote = (text) => `'${String(text).replace(/'/g, "'\\''")}'`;
