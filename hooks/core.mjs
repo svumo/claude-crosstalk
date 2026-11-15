@@ -559,9 +559,17 @@ export function vscodeLink(ask, scheme = "vscode") {
 // person's own `claude` functions live.
 // With `sameWindow` (this session runs in Windows Terminal) it is a new tab of the window the
 // person is already in (-w 0 is the most recently used one) rather than a window of its own.
-export function windowArgv(cwd, command, sameWindow = false) {
+// `shell` is pwsh (PowerShell 7) only when it is installed; Windows PowerShell always is.
+export function windowArgv(cwd, command, sameWindow = false, shell = "pwsh") {
   const target = sameWindow ? ["-w", "0", "new-tab"] : ["-w", "new"];
-  return ["wt", ...target, "-d", cwd, "pwsh", "-NoExit", "-Command", command];
+  return ["wt", ...target, "-d", cwd, shell, "-NoExit", "-Command", command];
+}
+
+// wt.exe is an App Execution Alias (a zero-byte file in WindowsApps). Claude Code's host runs on
+// Bun, which cannot start such a file itself ("Executable not found in $PATH", even by its full
+// path), but cmd.exe can. The same reason the VS Code command line goes through cmd.exe.
+export function viaCmd(argv) {
+  return ["cmd.exe", "/d", "/c", ...argv];
 }
 
 // macOS and Linux. A folder can hold any character, so it goes in single quotes; the command is

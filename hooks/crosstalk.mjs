@@ -17,7 +17,7 @@ import {
   addressOf, frameMessages, isLive, MAX_TEXT, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, showMessages, toolResultCount, toolUseCount,
   appPanelCommand, chooseOpenIn, DESKTOP_ENTRYPOINT, findOpened, HELPER_ID, isSafeLaunch, launchFor, NOT_IN_APP, OPEN_IN, PERMISSION_MODES, trustProject,
-  vscodeLink, editorFor, EDITOR_CHOICES, helperInstall, windowArgv, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
+  vscodeLink, editorFor, EDITOR_CHOICES, helperInstall, windowArgv, viaCmd, withLaunchFlags, parseOpenArgs, macArgv, linuxArgv, linuxCandidates, whichArgv,
   LINUX_TERMINALS, appDataFolders, appTitle, HOST_SESSION, labelOf, listLine, projectFolderName, transcriptTitle,
   choiceLabel, chosenProfile, COMPACT_INSTRUCTIONS, flagApplies, flagEnds, handoffName, handoffText, isOver, isPaused, LARGE_CONTEXT, LARGE_STOP,
   moveChoices, NOT_NOW, parsePercent, pausedNote, resumePrompt, stopLine, stopPoint, stopReason, summaryOf, USAGE_STOP, usagePhrase, windowKey, windowName, worstWindow,
@@ -931,13 +931,13 @@ async function openSession($, given, message, opts = {}) {
     ran = await runCode($, pc, editor, ["--open-url", vscodeLink({ name: `claude ${profile}`, cwd: openFolder ?? me.cwd, cmd: command }, editor.scheme)]);
   } else {
     const opener = pc.isWindows
-      ? { argv: windowArgv(openFolder ?? me.cwd, command, resolved.inWt), place: resolved.inWt ? "a new tab of this Windows Terminal window" : undefined }
+      ? { argv: viaCmd(windowArgv(openFolder ?? me.cwd, command, resolved.inWt, await windowsShell($))), place: resolved.inWt ? "a new tab of this Windows Terminal window" : undefined }
       : await unixWindow($, command);
     if (opener.error) {
       return { error: opener.error };
     }
     place = opener.place ?? place;
-    ran = await $.process.run(opener.argv, { timeoutMs: opener.timeoutMs ?? 30_000 }).catch(() => null);
+    ran = await keepError($.process.run(opener.argv, { timeoutMs: opener.timeoutMs ?? 30_000 }));
     if (opener.isMac && ran && ran.exitCode !== 0 && /-1743|not authori[sz]ed/i.test(ran.stderr ?? "")) {
       return { error: "macOS didn't let Crosstalk control Terminal. Allow it in System Settings > Privacy & Security > Automation, under the app this session runs in, then try again." };
     }
@@ -978,6 +978,19 @@ async function openInApp($, profile, command) {
   return {};
 }
 
+// pwsh (PowerShell 7) when it is installed, else Windows PowerShell, which every Windows has. A
+// window that asks for pwsh on a computer without it opens, shows an error and closes.
+async function windowsShell($) {
+  const found = await $.process.run(["cmd.exe", "/d", "/c", "where", "pwsh"], { timeoutMs: 10_000 }).catch(() => null);
+  return found && found.exitCode === 0 ? "pwsh" : "powershell";
+}
+
+// A program that could not be started used to come back as null and a bare "Couldn't open ...".
+// Keep the reason, so the message says what went wrong.
+function keepError(run) {
+  return run.catch((err) => ({ exitCode: -1, stderr: String(err?.message ?? err) }));
+}
+
 // A terminal for the Copilot attach viewer (`command`, a shell line the Copilot module built), in
 // `cwd`. In the desktop app it is a Terminal-panel tab, through the app's own tool (the app asks
 // the person to approve the command); else, or when that fails or open-in is window, a terminal
@@ -999,12 +1012,12 @@ async function openViewer($, command, cwd, title) {
       fellBack = ` (the Terminal panel couldn't be reached: ${String(err?.message ?? err).slice(0, 200)})`;
     }
   }
-  const opener = pc.isWindows ? { argv: windowArgv(cwd, command) } : await unixWindow($, command, cwd);
+  const opener = pc.isWindows ? { argv: viaCmd(windowArgv(cwd, command, false, await windowsShell($))) } : await unixWindow($, command, cwd);
   if (opener.error) {
     return { error: opener.error };
   }
   const place = opener.place ?? "a new terminal window";
-  const ran = await $.process.run(opener.argv, { timeoutMs: opener.timeoutMs ?? 30_000 }).catch(() => null);
+  const ran = await keepError($.process.run(opener.argv, { timeoutMs: opener.timeoutMs ?? 30_000 }));
   if (!ran || ran.exitCode !== 0) {
     return { error: `Couldn't open ${place}${ran?.stderr ? `: ${ran.stderr.trim().slice(0, 200)}` : "."}${fellBack}` };
   }

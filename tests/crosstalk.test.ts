@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import {
   addressOf, frameMessages, isLive, LIVE_MS, mayWake, messageFileName,
   pendingNames, profileName, resolveTarget, SHOW_TEXT, showMessages, toolResultCount, toolUseCount,
-  chooseOpenIn, editorFor, EDITORS, helperInstall, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, withLaunchFlags,
+  chooseOpenIn, editorFor, EDITORS, helperInstall, findOpened, isSafeLaunch, launchFor, trustProject, vscodeLink, windowArgv, viaCmd, withLaunchFlags,
   linuxArgv, linuxCandidates, macArgv, parseOpenArgs, shQuote, userShell, whichArgv,
   appDataFolders, appPanelCommand, appTitle, cleanTitle, labelOf, listLine, projectFolderName, transcriptTitle,
   chosenProfile, choiceLabel, flagApplies, flagEnds, FLAG_MS, handoffName, isPaused, moveChoices, NOT_NOW, parsePercent, pausedNote,
@@ -17,6 +17,9 @@ import {
 
 const NOW = 1_000_000
 const rec = (id: string, profile: string, address: string, seenAt = NOW) => ({ id, profile, address, seenAt, cwd: 'x' })
+// wt is started through cmd.exe (the host cannot start the App Execution Alias itself): cmd.exe /d /c wt ...
+const isWt = (a: string[]) => a[0] === 'cmd.exe' && a[3] === 'wt'
+const wtOf = (a: string[]) => a.slice(3)
 
 test('a profile is named from its config folder', async () => {
   expect(profileName(undefined, 'C:\\Users\\me\\.claude', undefined)).toBe('default')
@@ -554,6 +557,15 @@ test('the VS Code link carries any folder whole', async () => {
   expect(windowArgv(cwd, 'claude zai', true)).toEqual(['wt', '-w', '0', 'new-tab', '-d', cwd, 'pwsh', '-NoExit', '-Command', 'claude zai'])
 })
 
+test('a window asks for Windows PowerShell when pwsh is not installed', async () => {
+  expect(windowArgv('C:\\code', 'claude zai', false, 'powershell')).toEqual(['wt', '-w', 'new', '-d', 'C:\\code', 'powershell', '-NoExit', '-Command', 'claude zai'])
+  expect(windowArgv('C:\\code', 'claude zai', true, 'powershell')).toEqual(['wt', '-w', '0', 'new-tab', '-d', 'C:\\code', 'powershell', '-NoExit', '-Command', 'claude zai'])
+})
+
+test('wt is started through cmd.exe, as the host (Bun) cannot start an App Execution Alias itself', async () => {
+  expect(viaCmd(windowArgv('C:\\code', 'claude zai', false, 'powershell'))).toEqual(['cmd.exe', '/d', '/c', 'wt', '-w', 'new', '-d', 'C:\\code', 'powershell', '-NoExit', '-Command', 'claude zai'])
+})
+
 test('the session that opened is the new one of that profile in this folder', async () => {
   const r = (id: string, profile: string, cwd: string, startedAt: number) => ({ id, profile, address: `${profile}/${id}`, cwd, startedAt, seenAt: NOW })
   const records = [r('old', 'zai', 'C:\\code\\proj', NOW - 99_000), r('else', 'zai', 'C:\\other', NOW), r('w', 'work', 'C:\\code\\proj', NOW), r('new', 'zai', 'c:/code/proj/', NOW)]
@@ -663,7 +675,7 @@ test('from the desktop app, open types the launch command into a new Terminal pa
   const ok: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'team', model: 'sonnet' } as never)
   expect(JSON.stringify(ok)).toMatch(/Opening team \(claude team --model sonnet\) in a new tab of the app's Terminal panel/)
   expect(typed.at(-1)).toMatchObject({ command: "$env:CLAUDE_CODE_FORCE_SESSION_PERSISTENCE = '1'; claude team --model sonnet", cwd: 'C:\\code\\proj', title: 'claude team' })
-  expect(calls.some((a) => a[0] === 'wt' || a.includes('--list-extensions'))).toBe(false) // no window, no editor check
+  expect(calls.some((a) => isWt(a) || a.includes('--list-extensions'))).toBe(false) // no window, no editor check
   refuse = 'The user declined'
   expect(await say($, 'open team hi')).toMatch(/Terminal panel didn't run it: The user declined\. \/crosstalk where window/)
   expect(await say($, 'open-in window')).toMatch(/open in: window/)
@@ -678,7 +690,7 @@ test('open-in app outside the desktop app opens a window, and says why', async (
   await $.session.start(START)
   expect(await say($, 'open-in')).toMatch(/Why a window: this session isn't running in the Claude desktop app/)
   expect(await say($, 'open zai')).toMatch(/new terminal window, as this session isn't running in the Claude desktop app/)
-  expect(calls.some((a) => a[0] === 'wt')).toBe(true)
+  expect(calls.some(isWt)).toBe(true)
 })
 
 test('open-in window opens a terminal window, and the setting is kept', async ($, on) => {
@@ -696,7 +708,31 @@ test('open-in window opens a terminal window, and the setting is kept', async ($
   expect(opened).toMatch(/new terminal window/)
   expect(opened).toMatch(/may stop at the folder-trust screen/) // no zai profile to mark
   expect(calls.some((a) => a.includes('--list-extensions'))).toBe(false)
-  expect(calls.find((a) => a[0] === 'wt')).toEqual(['wt', '-w', 'new', '-d', 'C:\\code\\proj', 'pwsh', '-NoExit', '-Command', 'claude-zai'])
+  expect(calls.find(isWt)).toEqual(['cmd.exe', '/d', '/c', 'wt', '-w', 'new', '-d', 'C:\\code\\proj', 'pwsh', '-NoExit', '-Command', 'claude-zai'])
+})
+
+test('a window opens in Windows PowerShell when pwsh is not installed', async ($, on) => {
+  const calls: any[] = []
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', CLAUDE_CROSSTALK_OPEN_IN: 'window' }, (e: any) => {
+    calls.push(e.argv)
+    return e.argv[3] === 'where' && e.argv[4] === 'pwsh' ? { ...RAN_OK, exitCode: 1 } : RAN_OK // where pwsh finds nothing
+  })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  expect(await say($, 'open zai')).toMatch(/new terminal window/)
+  expect(calls.find(isWt)).toEqual(['cmd.exe', '/d', '/c', 'wt', '-w', 'new', '-d', 'C:\\code\\proj', 'powershell', '-NoExit', '-Command', 'claude-zai'])
+})
+
+test('a window that cannot be started says why, not just that it could not open', async ($, on) => {
+  fakeDisk(on, { USERPROFILE: 'C:\\home', CLAUDE_CONFIG_DIR: 'C:\\home\\.claude-work', CLAUDE_CROSSTALK_OPEN_IN: 'window' }, (e: any) => {
+    if (isWt(e.argv)) throw new Error('Executable not found in $PATH: "cmd.exe"')
+    return RAN_OK
+  })
+  on('clock.sleep', () => ({ value: undefined }))
+  await $.session.start(START)
+  const said = await say($, 'open zai')
+  expect(said).toMatch(/^Couldn't open a new terminal window: \S/) // a reason follows, never the bare "Couldn't open a new terminal window."
+  expect(said).not.toMatch(/window\.$/)
 })
 
 test('the open tool passes the model and permission mode on, and refuses bypassPermissions', async ($, on) => {
@@ -708,11 +744,11 @@ test('the open tool passes the model and permission mode on, and refuses bypassP
   await $.session.start(START)
   const refused: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'default', permissionMode: 'bypassPermissions' } as never)
   expect(JSON.stringify(refused)).toMatch(/isn't a permission mode/)
-  expect(calls.some((a) => a[0] === 'wt')).toBe(false)
+  expect(calls.some(isWt)).toBe(false)
   const ok: any = await $.tool.call({ tool: 'mcp__crosstalk__open', profile: 'default', model: 'sonnet', permissionMode: 'plan' } as never)
   expect(JSON.stringify(ok)).toMatch(/Opening default \(claude --model sonnet --permission-mode plan\)/)
   expect(JSON.stringify(ok)).not.toMatch(/trust/)
-  expect(calls.find((a) => a[0] === 'wt')!.at(-1)).toBe('claude --model sonnet --permission-mode plan')
+  expect(calls.find(isWt)!.at(-1)).toBe('claude --model sonnet --permission-mode plan')
   expect(JSON.parse(files.get('C:/home/.claude/.claude.json')).projects['C:/code/proj'].hasTrustDialogAccepted).toBe(true)
   expect(files.get('C:/home/.claude.json')).toBe('{"projects":{"C:/code/proj":{"hasTrustDialogAccepted":true}}}') // already trusted: left as it was
 })
@@ -724,9 +760,9 @@ test('/crosstalk open takes --model and --mode, and says what is wrong with a ba
   await $.session.start(START)
   expect(await say($, 'open zai --fast hi')).toMatch(/Unknown option --fast/)
   expect(await say($, 'open zai --mode bypassPermissions hi')).toMatch(/isn't a permission mode/)
-  expect(calls.some((a) => a[0] === 'wt')).toBe(false)
+  expect(calls.some(isWt)).toBe(false)
   expect(await say($, 'open zai --model opus --mode acceptedits review it')).toMatch(/Opening zai \(claude-zai --model opus --permission-mode acceptEdits\)/)
-  expect(calls.find((a) => a[0] === 'wt')!.at(-1)).toBe('claude-zai --model opus --permission-mode acceptEdits')
+  expect(calls.find(isWt)!.at(-1)).toBe('claude-zai --model opus --permission-mode acceptEdits')
 })
 
 test('a trust mark written over by a running session is put back', async ($, on) => {
@@ -1099,7 +1135,7 @@ test('with a readable transcript the handoff is cut from it: no compaction, one 
   expect(w.asked.length).toBe(1)
   expect(w.asked[0].questions[0].options.length).toBe(2) // team, Not now
   const opened = w.ran.find((argv: string[]) => argv.join(' ').includes('claude team'))
-  expect(opened.slice(0, 4)).toEqual(['wt', '-w', '0', 'new-tab'])
+  expect(wtOf(opened).slice(0, 4)).toEqual(['wt', '-w', '0', 'new-tab'])
 })
 
 test('usageCompact brings the model summary back', async ($, on) => {
